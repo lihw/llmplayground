@@ -7,6 +7,7 @@
 #ifndef M_DEFS_H
 #define M_DEFS_H
 
-#define NO_COPY_CONSTRUCTOR(Clazz)
+#define NO_COPY_CONSTRUCTOR(Clazz) \
+    Classz(const Cla)
 
 #endif //! M_DEFS_H
