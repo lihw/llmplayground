@@ -6,6 +6,7 @@
 
 #include "m_tokenizer_bpe.h"
 
+#include <algorithm>
 
 M_BEGIN_NAMESPACE
 
@@ -20,67 +21,114 @@ int TokenizerBpe::tokenize(const std::string &text, const Vocab &vocab, std::vec
   out_tokens.clear();
 
   int finalPrevIndex = -1;
-  for (auto &word : words) { symbols.clear(); }
-
-  return -1;
-}
-
-std::vector<std::string> TokenizerBpe::tokenize(const std::string &word) noexcept
-{
-  std::vector<std::string> symbols;
-
-  size_t offset = 0;
-  // Create symbols from each word
-  while (offset < word.size()) {
-    Symbol s;
-    size_t char_len = std::min(word.size() - offset, (size_t)::utf8_len(word[offset]));
-    s.text = word.c_str() + offset;
-    s.n = char_len;
-    offset += sym.n;
-    s.prev = index - 1;
-    s.next = offset == word.size() ? -1 : index + 1;
-    index++;
-    symbols.emplace_back(s);
+  for (auto &word : words) { 
+    auto bytes = tokenize(word, vocab); 
+  
+    // Tokenize the bytes
+    for (auto& b : bytes) {
+      const std::string str = std::string(b.text, b.n);
+      const auto token = vocab.token_to_id.find(str);
+      
+      // Roll back to multi-char tokens if not found.
+      if (token == vocab.token_to_id.end()) {
+          for (auto j = str.begin(); j != str.end(); ++j) {
+              std::string byteStr(1, *j);
+              auto tokenMultibyte = vocab.token_to_id.find(byteStr);
+              if (tokenMultibyte == vocab.token_to_id.end()) {
+                  throw std::runtime_error("ERROR: byte not found in vocab");
+              }
+              out_tokens.push_back((*tokenMultibyte).second);
+          }
+        } else {
+            out_tokens.push_back((*token).second);
+        }
+    }
   }
 
-  for (size_t i = 1; i < symbols.size(); i++) { addNewBigram(i - 1, i); }
+  // FIXME: The utf8 handling?
 
-  // Build tokens
+  // FIXME: the end of word?
+  return (int)out_tokens.size();
+}
+
+std::vector<TokenizerBpe::Byte> TokenizerBpe::tokenize(const std::string &word, const Vocab& vocab) noexcept
+{
+  std::vector<Byte> bytes;
+  
+  Bigram::Queue tasks;
+
+  auto addNewBigram = [&tasks, &bytes, &vocab](int left, int right) 
+  {
+      if (left == -1 || right == -1) { return; }
+
+      std::string leftSymbol = std::string(bytes[left].text, bytes[left].length);
+      std::string rightSymbol = std::string(bytes[right].text, bytes[right].length);
+
+      int rank = vocab.findBpeRank(leftSymbol, rightSymbol);
+
+      if (rank < 0) { return; }
+
+      Bigram bigram;
+
+      bigram.left = left;
+      bigram.right = right;
+      bigram.text = leftSymbol + rightSymbol;
+      bigram.length = leftSymbol.size() + rightSymbol.size();
+      bigram.rank = rank;
+
+      tasks.push(bigram);
+  };
+
+  int index = 0;
+  size_t offset = 0;
+
+  // Create BPE bytes from each word
+  while (offset < word.size()) {
+    Byte b;
+    size_t charLen = std::min(word.size() - offset, (size_t)::utf8_len(word[offset]));
+    b.text = word.c_str() + offset;
+    b.length = charLen;
+    offset += b.length;
+    b.prev = index - 1;
+    b.next = offset == word.size() ? -1 : index + 1;
+    index++;
+    bytes.emplace_back(b);
+  }
+
+  for (size_t i = 1; i < bytes.size(); i++) { addNewBigram(i - 1, i); }
+
+  // Merge bytes into longest ones.
   while (!tasks.empty()) {
     auto bigram = tasks.top();
-    tasks.pop_front();
+    tasks.pop();
 
-    auto &ls = symbols[bigram.left];// The left symbol
-    auto &rs = symbols[bigram.right];// The right one
+    auto &leftByte = bytes[bigram.left];// The left byte
+    auto &rightByte = bytes[bigram.right];// The right byte
 
-    if (ls.n == 0 || rs.n == 0) { continue; }
+    if (leftByte.length == 0 || rightByte.length == 0) { continue; }
 
-    std::string lt = std::string(ls.text, ls.length);// The left token
-    std::string rt = std::string(rs.text, rs.length);// Ditto
+    std::string leftToken = std::string(leftByte.text, leftByte.length);// The left token
+    std::string rightToken = std::string(rightByte.text, rightByte.length);// Ditto
 
-    if (lt + rt != bigram.text) {
+    if (leftToken + rightToken != bigram.text) {
       continue;// Skip the outdated bigram
     }
 
-    ls.next = rs.next;
-    if (rs.next >= 0) { symbols[rs.next].prev = bigram.left; }
+    // Remove the right byte from the sequence.
+    leftByte.next = rightByte.next;
+    if (rightByte.next >= 0) { bytes[rightByte.next].prev = bigram.left; }
 
-    addNewBigram(ls.prev, bigram.left);// left + bigram
-    addNewBigram(bigram.left, rs.next);// bigram + right
+    addNewBigram(leftByte.prev, bigram.left);// left + bigram
+    addNewBigram(bigram.left, rightByte.next);// bigram + right
   }
 
-  // add the finished tokens to the final list keeping correct order for next and prev
-  for (auto &s : symbols) {
-    if (s.length > 0) {
-      s.prev = finalPrevIndex;
-      s.next = -1;
-      if (finalPrevIndex != -1) { symbolsFinal[finalPrevIndex].next = symbolsFinal.size(); }
-      symbolsFinal.emplace_back(s);
-      finalPrevIndex = symbolsFinal.size() - 1;
-    }
-  }
+  // Add the finished tokens to the final list keeping correct order for next and prev
+  std::vector<Byte> out;
+  std::copy_if(bytes.begin(), bytes.end(), std::back_inserter(out), [](const Byte& b) {
+    return b.length > 0;
+  });
 
-  return symbols;
+  return out;
 }
 
 M_END_NAMESPACE
