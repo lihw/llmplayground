@@ -8,6 +8,7 @@
 #define M_VOCAB_H
 
 #include <common/m_defs.h>
+#include <common/m_token.h>
 
 #include <string>
 #include <unordered_map>
@@ -18,22 +19,22 @@
 
 M_BEGIN_NAMESPACE
 
-enum class VocabType {
-    NONE = 0, // For models without vocab
-    SPM  = 1, // LLaMA tokenizer based on byte-level BPE with byte fallback
-    BPE  = 2, // GPT-2 tokenizer based on byte-level BPE
-    WPM  = 3, // BERT tokenizer based on WordPiece
-};
-
 struct Vocab {
     using Id    = int32_t;
     using Token = std::string;
-    //using TType  = llama_token_type;
+    using TType = TokenType;
 
-    //enum llama_vocab_type type = LLAMA_VOCAB_TYPE_SPM;
+    enum class Type {
+        NONE = 0, // For models without vocab
+        SPM  = 1, // LLaMA tokenizer based on byte-level BPE with byte fallback
+        BPE  = 2, // GPT-2 tokenizer based on byte-level BPE
+        WPM  = 3, // BERT tokenizer based on WordPiece
+    };
+
+    Type type = Type::SPM;
 
     std::unordered_map<Token, Id> tokenToId;
-    std::vector<TokenData>       idToToken;
+    std::vector<TokenData>        idToToken;
 
     std::unordered_map<Token, Id> specialTokensCache;
 
@@ -57,7 +58,7 @@ struct Vocab {
     Id specialMiddleId = -1;
     Id specialEotId    = -1;
 
-    bool add_space_prefix = true;
+    bool addSpacePrefix = true;
 
     int findBpeRank(const std::string & leftBytes, const std::string& rightBytes) const {
         assert(leftBytes.find(' ') == std::string::npos); // Both left and right bytes shouldn't contain spaces and newlines
@@ -72,6 +73,9 @@ struct Vocab {
 
         return it->second;
     }
+
+    void load(ModelLoader &ml, Model &model)) noexcept;
+
 };
 
 M_END_NAMESPACE
