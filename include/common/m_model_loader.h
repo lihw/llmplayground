@@ -1,11 +1,11 @@
 /** 
-* Load the GGUF models from files
+* The abstract model loader class
 *
 * Author: lihw81@gmail.com
 */
 
-#ifndef M_MODEL_LOADER
-#define M_MODEL_LOADER
+#ifndef M_MODEL_LOADER_H
+#define M_MODEL_LOADER_H
 
 #include <common/m_defs.h>
 
@@ -14,21 +14,32 @@
 
 M_BEGIN_NAMESPACE
 
-class ModelLoader final {
+class ModelLoader {
+
     M_NO_COPY_CONSTRUCTOR(ModelLoader)
     M_NO_MOVE_CONSTRUCTOR(ModelLoader)
+
 public:
     explicit ModelLoader();
 
-    ~ModelLoader();
+    virtual ~ModelLoader();
 
-    bool load(const std::string& file, bool useMmap) noexcept;
+    virtual bool load(const std::string& file, bool useMmap) noexcept = 0;
 
-private:
-    uint32_t mNumKeyValues;
-    uint32_t mTensors;
+    const char* getTensorName(int i) const noexcept;
+    const Weight* getWeight(const char * name) noexcept;
+    ggml_tensor* getTensorMeta(const char* name) const noexcept; 
 
-    bool mUseMmap = false;
+protected:
+    size_t mNumKeyValues;
+    size_t mNumTensors;
+    size_t mNumElements;
+    size_t mNumBytes;
+
+    //bool mUseMmap = false;
+    //llama_files files;
+    //llama_mmaps mappings;
+    //std::unordered_map<std::string, struct llama_model_kv_override> kv_overrides;
     
     /**
      * The weight information of a model
@@ -48,10 +59,9 @@ private:
         }
     };
 
-    std::vector<Weight> mWeights;
-    
-    struct gguf_context * meta = NULL;
-    std::vector<ggml_context *> contexts;
+    std::vector<Weight>           mWeights;
+    gguf_context*                 mMeta;
+    std::vector<ggml_context*>    mContexts;
     
     std::string mArchName; //! The model arch
     //LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
@@ -59,5 +69,5 @@ private:
 
 M_END_NAMESPACE
 
-#endif // !M_MODEL_LOADER
+#endif // !M_MODEL_LOADER_H
 

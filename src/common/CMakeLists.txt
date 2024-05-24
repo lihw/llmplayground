@@ -1,4 +1,5 @@
-set(TARGET tokenizer)
+
+set(TARGET common)
 
 file(
     GLOB_RECURSE _source_list

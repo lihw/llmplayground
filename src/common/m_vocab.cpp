@@ -1,12 +1,12 @@
 /** 
-* The vocab loader
+* The vocabulary
 *
 * Author: lihw81@gmail.com
 */
 
 #include <common/m_vocab.h>
 
-//#include <spdlog/spdlog.h>
+#include <spdlog/spdlog.h>
 
 #include <cassert>
 
