@@ -6,7 +6,12 @@
 
 #include "m_tokenizer.h"
 
+#include <common/m_vocab.h>
+#include <common/unicode.h>
+
 #include <regex>
+
+#include <cassert>
 
 M_BEGIN_NAMESPACE
 
@@ -66,6 +71,27 @@ std::vector<std::string> Tokenizer::pretokenize(const std::string& text, const s
     return out;
 }
 
+TokenId Tokenizer::byteToToken(const Vocab& vocab, uint8_t ch) {
+    assert(vocab.getType() != Vocab::Type::NONE);
+    static const char * hex = "0123456789ABCDEF";
+    switch (vocab.getType()) {
+        case Vocab::Type::SPM: {
+            const char buf[7] = { '<', '0', 'x', hex[ch >> 4], hex[ch & 15], '>', 0 };
+            auto token = vocab.tokenToId.find(buf);
+            if (token != vocab.tokenToId.end()) {
+                return (*token).second;
+            }
+            // Try to fall back to just the byte as a string
+            const char buf2[2] = { (char)ch, 0 };
+            return vocab.tokenToId.at(buf2);
+        }
+        case Vocab::Type::WPM: 
+        case Vocab::Type::BPE: 
+            return vocab.tokenToId.at(unicode_byte_to_utf8(ch));
+        default:
+            assert(false);
+    }
+}
 
 M_END_NAMESPACE
 

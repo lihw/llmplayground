@@ -29,17 +29,6 @@ public:
 
 private:
     /**
-     * Byte in BPE 
-    */
-    struct Byte {
-        using index = int;
-        index prev;
-        index next;
-        const char *text;
-        size_t length;
-    };
-
-    /**
      * Byte pair in BPE
     */
     struct Bigram {

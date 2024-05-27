@@ -17,13 +17,13 @@ using Token = std::string;
 using TokenId = int32_t;
 
 enum class TokenType {
-    TYPE_UNDEFINED    = 0,
-    TYPE_NORMAL       = 1,
-    TYPE_UNKNOWN      = 2,
-    TYPE_CONTROL      = 3,
-    TYPE_USER_DEFINED = 4,
-    TYPE_UNUSED       = 5,
-    TYPE_BYTE         = 6,
+    UNDEFINED    = 0,
+    NORMAL       = 1,
+    UNKNOWN      = 2,
+    CONTROL      = 3,
+    USER_DEFINED = 4,
+    UNUSED       = 5,
+    BYTE         = 6,
 };
 
 struct TokenData {

@@ -4,7 +4,7 @@
 * Author: lihw81@gmail.com
 */
 
-#include "m_model_loader.h"
+#include <common/m_model_loader.h>
 
 #include <spdlog/spdlog.h>
 
@@ -12,24 +12,6 @@ M_BEGIN_NAMESPACE
 
 ModelLoader::ModelLoader() 
 {
-}
-
-template<typename T>
-bool ModelLoader::getKey(const std::string& key, T& result, const bool required = true) 
-{
-    const bool found = GGUFMeta::GKV<T>::set(meta, key, result, nullptr);
-
-    if (required && !found) {
-        spdlog::error("key not found in model: %s", key.c_str());
-        return false;
-    }
-
-    return found;
-}
-
-template<typename T>
-bool ModelLoader::getKey(const Kv kid, T& result, const bool required = true) {
-    return getKey(Kv(kid), result, required);
 }
 
 ModelLoader::~ModelLoader() 
@@ -75,12 +57,14 @@ get_arr_n(const enum llm_kv kid, T & result, const bool required = true) {
 //    return llm_kv.arch;
 //}
 
-const char* ModelLoader::getTensorName(int i) const noexcept {
-    return mWeights.at(i).tensor->name;
+const char* ModelLoader::getTensorName(int i) const noexcept 
+{
+    return mWeights.at(size_t(i)).tensor->name;
 }
 
-ModelLoader::Weight* getWeight(const char * name) noexcept {
-    for (const auto& weight : weights) {
+ModelLoader::Weight* ModelLoader::getWeight(const char * name) noexcept 
+{
+    for (auto& weight : mWeights) {
         if (strcmp(name, weight.tensor->name) == 0) {
             return &weight;
         }
@@ -89,7 +73,8 @@ ModelLoader::Weight* getWeight(const char * name) noexcept {
     return nullptr;
 }
 
-ggml_tensor* ModelLoader::getTensorMeta(const char* name) const noexcept {
+ggml_tensor* ModelLoader::getTensorMeta(const char* name) noexcept 
+{
     const auto * weight = getWeight(name);
     if (!weight) {
         spdlog::error("%s: tensor '%s' not found", __func__, name);
@@ -98,7 +83,8 @@ ggml_tensor* ModelLoader::getTensorMeta(const char* name) const noexcept {
     return weight->tensor;
 }
 
-ggml_tensor* ModelLoader::getTensorMeta(int i) const {
+ggml_tensor* ModelLoader::getTensorMeta(int i) noexcept
+{
     return get_tensor_meta(getTensorName(i));
 }
 

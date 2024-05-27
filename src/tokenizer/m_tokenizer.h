@@ -32,6 +32,17 @@ public:
 
 protected:
     /**
+     * Byte in BPE 
+    */
+    struct Byte {
+        using index = int;
+        index prev;
+        index next;
+        const char *text;
+        size_t length;
+    };
+
+    /**
      * Split the text into words
      */
     std::vector<std::string> pretokenize(const std::string& text, const std::vector<std::string>& specials) noexcept;
@@ -41,6 +52,8 @@ protected:
         uint8_t highbits = static_cast<uint8_t>(src) >> 4;
         return lookup[highbits];
     }
+
+    TokenId byteToToken(const Vocab& vocab, uint8_t ch);
 };
 
 M_END_NAMESPACE

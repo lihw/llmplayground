@@ -7,7 +7,7 @@
 #ifndef M_MODEL_LOADER_GGUF_H
 #define M_MODEL_LOADER_GGUF_H
 
-#include "mesh_loader.h"
+#include "m_model_loader.h"
 
 M_BEGIN_NAMESPACE
 

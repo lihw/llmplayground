@@ -163,6 +163,8 @@
             "displayName": "clang Debug",
             "description": "Target Unix-like OS with the clang compiler, debug build type",
             "inherits": "conf-unixlike-common",
+            "binaryDir": "out/",
+            "generator": "Unix Makefiles",
             "cacheVariables": {
                 "CMAKE_C_COMPILER": "clang",
                 "CMAKE_CXX_COMPILER": "clang++",
@@ -174,6 +176,8 @@
             "displayName": "clang Release",
             "description": "Target Unix-like OS with the clang compiler, release build type",
             "inherits": "conf-unixlike-common",
+            "binaryDir": "out/",
+            "generator": "Unix Makefiles",
             "cacheVariables": {
                 "CMAKE_C_COMPILER": "clang",
                 "CMAKE_CXX_COMPILER": "clang++",

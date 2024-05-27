@@ -38,6 +38,7 @@ target_link_system_libraries(
           fmt::fmt
           spdlog::spdlog
           lefticus::tools
+          ggml
           )
 
 target_include_directories(${TARGET} PRIVATE "${CMAKE_BINARY_DIR}/configured_files/include")

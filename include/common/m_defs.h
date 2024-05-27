@@ -7,6 +7,8 @@
 #ifndef M_DEFS_H
 #define M_DEFS_H
 
+#include <string>
+
 #define M_NO_COPY_CONSTRUCTOR(Clazz) \
     Clazz(const Clazz&) = delete; \
     Clazz(Clazz&&) = delete; 
@@ -166,7 +168,26 @@ enum class FType {
     GUESSED = 1024, // not specified in the model file
 };
 
+enum class KvOverrideType {
+    BOOL = 1,
+    FLOAT = 2,
+    INT = 3,
+};
+
+struct KvOverride {
+    char key[128];
+    enum KvOverrideType tag;
+    union {
+        int64_t intValue;
+        double floatValue;
+        bool boolValue;
+    };
+};
 
 extern Arch getArchFromString(const std::string& name) noexcept;
+
+extern std::string getKvString(Kv kv, Arch arch) noexcept;
+
+extern std::string getKvString(Kv kv, const std::string& archName) noexcept;
 
 #endif //! M_DEFS_H

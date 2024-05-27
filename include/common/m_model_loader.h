@@ -8,6 +8,9 @@
 #define M_MODEL_LOADER_H
 
 #include <common/m_defs.h>
+#include <common/m_gguf.h>
+
+#include <ggml/ggml.h>
 
 #include <string>
 #include <vector>
@@ -20,27 +23,6 @@ class ModelLoader {
     M_NO_MOVE_CONSTRUCTOR(ModelLoader)
 
 public:
-    explicit ModelLoader();
-
-    virtual ~ModelLoader();
-
-    virtual bool load(const std::string& file, bool useMmap) noexcept = 0;
-
-    const char* getTensorName(int i) const noexcept;
-    const Weight* getWeight(const char * name) noexcept;
-    ggml_tensor* getTensorMeta(const char* name) const noexcept; 
-
-protected:
-    size_t mNumKeyValues;
-    size_t mNumTensors;
-    size_t mNumElements;
-    size_t mNumBytes;
-
-    //bool mUseMmap = false;
-    //llama_files files;
-    //llama_mmaps mappings;
-    //std::unordered_map<std::string, struct llama_model_kv_override> kv_overrides;
-    
     /**
      * The weight information of a model
     */
@@ -59,6 +41,47 @@ protected:
         }
     };
 
+public:
+    explicit ModelLoader();
+
+    virtual ~ModelLoader();
+
+    virtual bool load(const std::string& file, bool useMmap) noexcept = 0;
+
+    const char* getTensorName(int i) const noexcept;
+    Weight* getWeight(const char * name) noexcept;
+    ggml_tensor* getTensorMeta(const char* name) noexcept; 
+    ggml_tensor* getTensorMeta(int i) noexcept;
+
+    template<typename T>
+    bool getKey(const std::string& key, T& result, const bool required = true) 
+    {
+        const bool found = GGUFMeta::GKV<T>::set(mMeta, key, result, nullptr);
+
+        if (required && !found) {
+            spdlog::error("key not found in model: %s", key.c_str());
+            return false;
+        }
+
+        return found;
+    }
+
+    template<typename T>
+    bool getKey(const Kv kid, T& result, const bool required = true) {
+        return getKey(Kv(kid), result, required);
+    }
+
+protected:
+    size_t mNumKeyValues;
+    size_t mNumTensors;
+    size_t mNumElements;
+    size_t mNumBytes;
+
+    //bool mUseMmap = false;
+    //llama_files files;
+    //llama_mmaps mappings;
+    //std::unordered_map<std::string, struct llama_model_kv_override> kv_overrides;
+    
     std::vector<Weight>           mWeights;
     gguf_context*                 mMeta;
     std::vector<ggml_context*>    mContexts;

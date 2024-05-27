@@ -19,6 +19,9 @@
 
 M_BEGIN_NAMESPACE
 
+class Model;
+class ModelLoader;
+
 struct Vocab {
     using Id    = int32_t;
     using Token = std::string;
@@ -60,6 +63,10 @@ struct Vocab {
 
     bool addSpacePrefix = true;
 
+    Type getType() const {
+        return type;
+    }
+
     int findBpeRank(const std::string & leftBytes, const std::string& rightBytes) const {
         assert(leftBytes.find(' ') == std::string::npos); // Both left and right bytes shouldn't contain spaces and newlines
         assert(leftBytes.find('\n') == std::string::npos);
@@ -74,8 +81,7 @@ struct Vocab {
         return it->second;
     }
 
-    void load(ModelLoader &ml, Model &model)) noexcept;
-
+    bool load(ModelLoader &ml, Model &model) noexcept;
 };
 
 M_END_NAMESPACE

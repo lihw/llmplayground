@@ -14,7 +14,7 @@
 
 M_BEGIN_NAMESPACE
 
-void Vocab::load(ModelLoader& ml, llama_model &model) noexcept
+bool Vocab::load(ModelLoader& ml, Model& model) noexcept
 {
     gguf_context *ctx = ml.getContext();
 
@@ -52,15 +52,15 @@ void Vocab::load(ModelLoader& ml, llama_model &model) noexcept
             specialClsId = -1;
             specialMaskId = -1;
 
-            const int addSpacePrefixKeyidx = gguf_find_key(ctx, Kv(LLM_KV_TOKENIZER_ADD_PREFIX).c_str());
-            if (addSpacePrefixKeyidx != -1) {
-                addSpacePrefix = gguf_get_val_bool(ctx, add_space_prefix_keyidx);
+            const int addSpacePrefixKeyIdx = gguf_find_key(ctx, getKvString(Kv::TOKENIZER_ADD_PREFIX, ml.getArchName()).c_str());
+            if (addSpacePrefixKeyIdx != -1) {
+                addSpacePrefix = gguf_get_val_bool(ctx, addSpacePrefixKeyIdx);
             }// The default value of add_space_prefix is true.
         } else if (tokenizerName == "gpt2") {
             type = Type::BPE;
 
             // read bpe merges and populate bpe ranks
-            const int mergesKeyIdx = gguf_find_key(ctx, kv(LLM_KV_TOKENIZER_MERGES).c_str());
+            const int mergesKeyIdx = gguf_find_key(ctx, Kv::TOKENIZER_MERGES.c_str());
             if (mergesKeyIdx == -1) {
                 spdlog::error("cannot find tokenizer merges in model file\n");
                 return false;
@@ -68,7 +68,7 @@ void Vocab::load(ModelLoader& ml, llama_model &model) noexcept
 
             const int nMerges = gguf_get_arr_n(ctx, mergesKeyIdx);
 
-            for (int i = 0; i < n_merges; i++) {
+            for (int i = 0; i < nMerges; i++) {
                 const std::string word = gguf_get_arr_str(ctx, mergesKeyIdx, i);
                 assert(unicode_cpts_from_utf8(word).size() > 0);
 
@@ -106,37 +106,35 @@ void Vocab::load(ModelLoader& ml, llama_model &model) noexcept
             specialMaskId = 103;
             addSpacePrefix = false;
         } else {
-            spdlog::warn("%s: unknown tokenizer: '%s'", __func__, tokenizer_name.c_str());
+            spdlog::warn("%s: unknown tokenizer: '%s'", __func__, tokenizerName.c_str());
             spdlog::warn("%s: using default tokenizer: 'llama'", __func__);
 
             type = Type::SPM
         }
     }
 
-    const int tokenIdx = gguf_find_key(ctx, kv(LLM_KV_TOKENIZER_LIST).c_str());
-    if (token_idx == -1) {
+    const int tokenIdx = gguf_find_key(ctx, getKvString(Kv::TOKENIZER_LIST, ml.getArchName()).c_str());
+    if (tokenIdx == -1) {
         spdlog::error("cannot find tokenizer vocab in model file");
         return false;
     }
 
     const float *scores = nullptr;
-    const int scoreIdx = gguf_find_key(ctx, kv(LLM_KV_TOKENIZER_SCORES).c_str());
+    const int scoreIdx = gguf_find_key(ctx, getKvString(Kv::TOKENIZER_SCORES, ml.getArchName()).c_str());
     if (scoreIdx != -1) {
         scores = (const float *)gguf_get_arr_data(ctx, scoreIdx);
     }
 
     const int *toktypes = nullptr;
-    const int toktypeIdx = gguf_find_key(ctx, kv(LLM_KV_TOKENIZER_TOKEN_TYPE).c_str());
+    const int toktypeIdx = gguf_find_key(ctx, getKvString(Kv::TOKENIZER_TOKEN_TYPE, ml.getArchName()).c_str());
     if (toktypeIdx != -1) {
         toktypes = (const int *)gguf_get_arr_data(ctx, toktypeIdx);
     }
 
     const uint32_t numVocab = gguf_get_arr_n(ctx, tokenIdx);
-
-    id_to_token.resize(numVocab);
-
-    for (uint32_t i = 0; i < n_vocab; i++) {
-        std::string word = gguf_get_arr_str(ctx, token_idx, i);
+    idToToken.resize(numVocab);
+    for (uint32_t i = 0; i < numVocab; i++) {
+        std::string word = gguf_get_arr_str(ctx, tokenIdx, i);
         assert(unicode_cpts_from_utf8(word).size() > 0);
 
         tokenToId[word] = i;
@@ -146,53 +144,53 @@ void Vocab::load(ModelLoader& ml, llama_model &model) noexcept
         tokenData.score = scores ? scores[i] : 0.0f;
         tokenData.type = toktypes ? (TokenType)toktypes[i] : TokenType::NORMAL;
     }
-    GGML_ASSERT(idToToken.size() == tokenToId.size());
+    assert(idToToken.size() == tokenToId.size());
 
     // determine the newline token: LLaMA "<0x0A>" == 10 == '\n', Falcon 193 == '\n'
-    if (vocab.type == Type::SPM) {
+    if (type == Type::SPM) {
         try {
-            linefeed_id = llama_byte_to_token(vocab, '\n');
+            lineFeedId = convertByteToToken('\n');
         } catch (const std::exception &e) {
             spdlog::warn("%s: SPM vocabulary, but newline token not found: %s! Using special_pad_id instead.",
                 __func__, e.what());
-            linefeed_id = special_pad_id;
+            lineFeedId = specialPadId;
         }
     } else if (type == Type::WPM) {
-        linefeed_id = vocab.special_pad_id;
+        lineFeedId = specialPadId;
     } else {
-        const std::vector<int> ids = llama_tokenize_internal(vocab, "\xC4\x8A", false);// U+010A
+        const std::vector<int> ids = llama_tokenize_internal("\xC4\x8A", false);// U+010A
         assert(!ids.empty() && "model vocab missing newline token");
-        linefeed_id = ids[0];
+        lineFeedId = ids[0];
     }
 
     // special tokens
     {
         const std::vector<std::pair<Kv, int32_t &>> specialTokenTypes = {
-            { BOS_ID, specialBosId },
-            { EOS_ID, specialEosId },
-            { UNK_ID, specialUnkId },
-            { SEP_ID, specialSepId },
-            { PAD_ID, specialPadId },
-            { CLS_ID, specialClsId },
-            { MASK_ID, specialMaskId },
-            { PREFIX_ID, specialPrefixId },
-            { SUFFIX_ID, specialSuffixId },
-            { MIDDLE_ID, specialMiddleId },
-            { EOT_ID, specialEotId },
+            { Kv::TOKENIZER_BOS_ID, specialBosId },
+            { Kv::TOKENIZER_EOS_ID, specialEosId },
+            { Kv::TOKENIZER_UNK_ID, specialUnkId },
+            { Kv::TOKENIZER_SEP_ID, specialSepId },
+            { Kv::TOKENIZER_PAD_ID, specialPadId },
+            { Kv::TOKENIZER_CLS_ID, specialClsId },
+            { Kv::TOKENIZER_MASK_ID, specialMaskId },
+            { Kv::TOKENIZER_PREFIX_ID, specialPrefixId },
+            { Kv::TOKENIZER_SUFFIX_ID, specialSuffixId },
+            { Kv::TOKENIZER_MIDDLE_ID, specialMiddleId },
+            { Kv::TOKENIZER_EOT_ID, specialEotId },
         };
-        for (const auto &it : special_token_types) {
-            const std::string &key = kv(std::get<0>(it));
+        for (const auto &it : specialTokenTypes) {
+            const std::string &key = getKvString(std::get<0>(it), ml.getArchName());
             int32_t &id = std::get<1>(it);
 
-            uint32_t new_id;
-            if (!ml.getKey(std::get<0>(it), new_id, false)) {
+            uint32_t newId;
+            if (!ml.getKey(std::get<0>(it), newId, false)) {
                 continue;
             }
-            if (new_id >= vocab.id_to_token.size()) {
+            if (newId >= idToToken.size()) {
                 spdlog::warn(
-                    "%s: bad special token: '%s' = %ud, using default id %d\n", __func__, key.c_str(), new_id, id);
+                    "%s: bad special token: '%s' = %ud, using default id %d\n", __func__, key.c_str(), newId, id);
             } else {
-                id = new_id;
+                id = newId;
             }
         }
 
@@ -200,11 +198,11 @@ void Vocab::load(ModelLoader& ml, llama_model &model) noexcept
         {
             bool temp = true;
 
-            if (ml.getKey(ADD_BOS, temp, false)) {
-                vocab.specialAddBos = int(temp);
+            if (ml.getKey(Kv::TOKENIZER_ADD_BOS, temp, false)) {
+                specialAddBos = int(temp);
             }
-            if (ml.getKey(ADD_EOS, temp, false)) {
-                vocab.specialAddEos = int(temp);
+            if (ml.getKey(Kv::TOKENIZER_ADD_EOS, temp, false)) {
+                specialAddEos = int(temp);
             }
         }
     }
@@ -223,12 +221,12 @@ void Vocab::load(ModelLoader& ml, llama_model &model) noexcept
         // Counting special tokens and verifying in only one direction
         //  is sufficient to detect difference in those two sets.
         //
-        uint32_t special_tokens_count_by_type = 0;
-        uint32_t special_tokens_count_from_verification = 0;
+        uint32_t specialTokensCountByType = 0;
+        uint32_t specialTokensCountFromVerification = 0;
 
-        bool special_tokens_definition_mismatch = false;
+        bool specialTokensDefinitionMismatch = false;
 
-        for (const auto &[token id] : vocab.tokenToId) {
+        for (const auto &[token, id] : tokenToId) {
             // Count all non-normal tokens in the vocab while iterating
             if (idToToken[id].type != TokenType::NORMAL) {
                 specialTokensCountByType++;
@@ -245,12 +243,12 @@ void Vocab::load(ModelLoader& ml, llama_model &model) noexcept
                     const auto right = token.substr(i);
 
                     // check if we didnt partition in the middle of a utf sequence
-                    auto utf = utf8_len(left.at(left.length() - 1));
+                    auto utf = utf8Len(left.at(left.length() - 1));
 
                     // If the token can be split into two short ones.
                     if (utf == 1) {
                         if (tokenToId.find(left) != tokenToId.end()
-                            && tokenToId.find(right) != vocab.token_to_id.end()) {
+                            && tokenToId.find(right) != tokenToId.end()) {
                             isTokenizable = true;
                             break;
                         }
@@ -266,42 +264,42 @@ void Vocab::load(ModelLoader& ml, llama_model &model) noexcept
                     //  it's faster to re-filter them here, since there are way less candidates now
 
                     // Calculate a total "utf" length of a token string representation
-                    size_t utf8StrLen = 0;
+                    size_t utf8StrLen = 0; // The number of utf characters
                     for (unsigned i = 0; i < token.length();) {
                         utf8StrLen++;
                         i += utf8Len(token.at(i));
                     }
 
                     // And skip the ones which are one character
-                    if (utf8_str_len > 1) {
+                    if (utf8StrLen > 1) {
                         // At this point what we have left are special tokens only
-                        special_tokens_cache[token] = id;
+                        specialTokensCache[token] = id;
 
                         // Count manually found special tokens
-                        special_tokens_count_from_verification++;
+                        specialTokensCountFromVerification++;
 
                         // If this manually found special token is not marked as such, flag a mismatch
-                        if (id_to_token[id].type == LLAMA_TOKEN_TYPE_NORMAL) {
-                            special_tokens_definition_mismatch = true;
+                        if (idToToken[id].type == TokenType::NORMAL) {
+                            specialTokensDefinitionMismatch = true;
                         }
                     }
                 }
             }
         }
 
-        if (special_tokens_definition_mismatch
-            || special_tokens_count_from_verification != special_tokens_count_by_type) {
+        if (specialTokensDefinitionMismatch
+            || specialTokensCountFromVerification != specialTokensCountByType) {
             spdlog::warn("%s: mismatch in special tokens definition ( %u/%zu vs %u/%zu ).\n",
                 __func__,
-                special_tokens_count_from_verification,
-                vocab.id_to_token.size(),
-                special_tokens_count_by_type,
-                vocab.id_to_token.size());
+                specialTokensCountFromVerification, 
+                idToToken.size(),
+                specialTokensCountByType,
+                idToToken.size());
         } else {
             spdlog::info("%s: special tokens definition check successful ( %u/%zu ).\n",
                 __func__,
-                special_tokens_count_from_verification,
-                vocab.id_to_token.size());
+                specialTokensCountFromVerification, 
+                idToToken.size());
         }
     }
 }

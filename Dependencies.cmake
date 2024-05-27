@@ -40,4 +40,13 @@ function(myproject_setup_dependencies)
     cpmaddpackage("gh:lefticus/tools#update_build_system")
   endif()
 
+  if(NOT TARGET gerganov::ggml)
+    CPMAddPackage(
+      NAME ggml
+      GIT_REPOSITORY https://github.com/ggerganov/ggml.git
+      GIT_TAG 0cbb7c0e053f5419cfbebb46fbf4d4ed60182cf5
+   )
+  endif()
+
+
 endfunction()
