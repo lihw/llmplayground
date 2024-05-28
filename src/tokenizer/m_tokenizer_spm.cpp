@@ -27,8 +27,8 @@ int TokenizerSpm::tokenize(const std::string& text, const Vocab& vocab, std::vec
         b.text = text.c_str() + offset;
         b.length = charLen;
         offset += b.length;
-        b.prev = index - 1;
-        b.next = offset == text.size() ? -1 : index + 1;
+        b.prev = int(index) - 1;
+        b.next = offset == text.size() ? -1 : int(index) + 1;
         index++;
         bytes.emplace_back(b);
     }
