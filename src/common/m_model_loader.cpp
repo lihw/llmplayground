@@ -85,7 +85,7 @@ ggml_tensor* ModelLoader::getTensorMeta(const char* name) noexcept
 
 ggml_tensor* ModelLoader::getTensorMeta(int i) noexcept
 {
-    return get_tensor_meta(getTensorName(i));
+    return getTensorMeta(getTensorName(i));
 }
 
 #if 0

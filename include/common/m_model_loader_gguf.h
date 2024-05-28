@@ -11,7 +11,7 @@
 
 M_BEGIN_NAMESPACE
 
-class ModelLoaderGguf : public MeshLoader final {
+class ModelLoaderGguf final : public ModelLoader {
     M_NO_COPY_CONSTRUCTOR(ModelLoaderGguf)
     M_NO_MOVE_CONSTRUCTOR(ModelLoaderGguf)
 
@@ -24,6 +24,10 @@ public:
 
 private:
     gguf_context* mMeta = nullptr;
+
+    int mNumKv = 0;
+    GgufVersion mVersion = GgufVersion::V1;
+    
 };
 
 M_END_NAMESPACE

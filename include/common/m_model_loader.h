@@ -8,7 +8,7 @@
 #define M_MODEL_LOADER_H
 
 #include <common/m_defs.h>
-#include <common/m_gguf.h>
+//#include <common/m_gguf.h>
 
 #include <ggml/ggml.h>
 
@@ -52,6 +52,14 @@ public:
     Weight* getWeight(const char * name) noexcept;
     ggml_tensor* getTensorMeta(const char* name) noexcept; 
     ggml_tensor* getTensorMeta(int i) noexcept;
+    gguf_context* getContext() const noexcept 
+    {
+        return mMeta;
+    }
+    const std::string& getArchName() const noexcept
+    {
+        return mArchName;
+    }
 
     template<typename T>
     bool getKey(const std::string& key, T& result, const bool required = true) 

@@ -131,7 +131,7 @@ enum class Arch {
 };
 
 // model file types
-enum class FType {
+enum class GgufType {
     ALL_F32              = 0,
     MOSTLY_F16           = 1,  // except 1d tensors
     MOSTLY_Q4_0          = 2,  // except 1d tensors
@@ -182,6 +182,12 @@ struct KvOverride {
         double floatValue;
         bool boolValue;
     };
+};
+
+enum class GgufVersion {
+    V1,
+    V2,
+    V3,
 };
 
 extern Arch getArchFromString(const std::string& name) noexcept;

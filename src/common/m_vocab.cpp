@@ -7,6 +7,7 @@
 #include <common/m_vocab.h>
 
 #include <common/m_model_loader.h>
+#include <common/unicode.h>
 
 #include <spdlog/spdlog.h>
 
@@ -39,7 +40,7 @@ bool Vocab::load(ModelLoader& ml, Model& model) noexcept
             specialMaskId = -1;
             lineFeedId = -1;
 
-            return;
+            return true;
         } else if (tokenizerName == "llama") {
             type = Type::SPM;
 
@@ -60,7 +61,7 @@ bool Vocab::load(ModelLoader& ml, Model& model) noexcept
             type = Type::BPE;
 
             // read bpe merges and populate bpe ranks
-            const int mergesKeyIdx = gguf_find_key(ctx, Kv::TOKENIZER_MERGES.c_str());
+            const int mergesKeyIdx = gguf_find_key(ctx, getKvString(Kv::TOKENIZER_MERGES, ml.getArchName()).c_str());
             if (mergesKeyIdx == -1) {
                 spdlog::error("cannot find tokenizer merges in model file\n");
                 return false;
@@ -109,7 +110,7 @@ bool Vocab::load(ModelLoader& ml, Model& model) noexcept
             spdlog::warn("%s: unknown tokenizer: '%s'", __func__, tokenizerName.c_str());
             spdlog::warn("%s: using default tokenizer: 'llama'", __func__);
 
-            type = Type::SPM
+            type = Type::SPM;
         }
     }
 
@@ -302,6 +303,8 @@ bool Vocab::load(ModelLoader& ml, Model& model) noexcept
                 idToToken.size());
         }
     }
+
+    return true;
 }
 
 M_END_NAMESPACE
