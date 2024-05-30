@@ -14,38 +14,29 @@
 
 M_BEGIN_NAMESPACE
 
-int TokenizerBpe::tokenize(const std::string &text, const Vocab &vocab, std::vector<TokenId> &out_tokens) noexcept
+int TokenizerBpe::tokenize(const std::string &word, const Vocab &vocab, std::vector<TokenId> &out_tokens) noexcept
 {
-    // FIXME:
-    // Currently we don't have any specials
-    std::vector<std::string> specials = {};
-    std::vector<std::string> words = pretokenize(text, specials);
+    auto bytes = tokenizeInternal(word, vocab); 
 
-    // Create tokens from each word
-    out_tokens.clear();
+    // Tokenize the bytes
+    for (auto& b : bytes) {
+        const std::string str = std::string(b.text, b.length);
+        const auto token = vocab.tokenToId.find(str);
 
-    for (auto &word : words) { 
-        auto bytes = tokenizeInternal(word, vocab); 
-
-        // Tokenize the bytes
-        for (auto& b : bytes) {
-            const std::string str = std::string(b.text, b.length);
-            const auto token = vocab.tokenToId.find(str);
-
-            // Roll back to multi-char tokens if not found.
-            if (token == vocab.tokenToId.end()) {
-                for (auto j = str.begin(); j != str.end(); ++j) {
-                    std::string byteStr(1, *j);
-                    auto tokenMultibyte = vocab.tokenToId.find(byteStr);
-                    if (tokenMultibyte == vocab.tokenToId.end()) {
-                        spdlog::error("ERROR: byte not found in vocab");
-                        return -1;
-                    }
-                    out_tokens.push_back((*tokenMultibyte).second);
+        // Roll back to multi-char tokens if not found.
+        if (token == vocab.tokenToId.end()) {
+            for (auto j = str.begin(); j != str.end(); ++j) {
+                std::string byteStr(1, *j);
+                auto tokenMultibyte = vocab.tokenToId.find(byteStr);
+                if (tokenMultibyte == vocab.tokenToId.end()) {
+                    spdlog::error("ERROR: byte not found in vocab");
+                    return -1;
                 }
-            } else {
-                out_tokens.push_back((*token).second);
+                out_tokens.push_back((*tokenMultibyte).second);
             }
+        }
+        else {
+            out_tokens.push_back((*token).second);
         }
     }
 
@@ -88,7 +79,7 @@ std::vector<TokenizerBpe::Byte> TokenizerBpe::tokenizeInternal(const std::string
     // Create BPE bytes from each word
     while (offset < word.size()) {
         Byte b;
-        size_t charLen = std::min(word.size() - offset, (size_t)utf8_len(word[offset]));
+        size_t charLen = std::min(word.size() - offset, (size_t)utf8Len(word[offset]));
         b.text = word.c_str() + offset;
         b.length = charLen;
         offset += b.length;

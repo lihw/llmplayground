@@ -27,7 +27,8 @@ public:
 
     virtual ~TokenizerSpm() override;
 
-    virtual int tokenize(const std::string& text, const Vocab& vocab, std::vector<TokenId>& out_tokens) noexcept final;
+    virtual int tokenize(const std::string& text, const Vocab& vocab, 
+            std::vector<TokenId>& out_tokens) noexcept final;
 
 private:
 
@@ -51,10 +52,10 @@ private:
     };
 
 private:
-  void resegment(const Tokenizer::Byte &byte,
-                 const std::vector<Tokenizer::Byte> &bytes,
-                 std::unordered_map<std::string, std::pair<int, int>>& revMerge,
-                 const Vocab &vocab, std::vector<Vocab::Id> &output);
+    void resegment(const Tokenizer::Byte &byte,
+            const std::vector<Tokenizer::Byte> &bytes,
+            std::unordered_map<std::string, std::pair<int, int>>& revMerge,
+            const Vocab &vocab, std::vector<Vocab::Id> &output);
 };
 
 

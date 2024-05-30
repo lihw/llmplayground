@@ -8,6 +8,9 @@
 
 #include <common/m_model_loader.h>
 #include <common/unicode.h>
+#include <common/m_misc.h>
+
+#include "../tokenizer/m_tokenizer_bpe.h"
 
 #include <spdlog/spdlog.h>
 
@@ -15,7 +18,7 @@
 
 M_BEGIN_NAMESPACE
 
-bool Vocab::load(ModelLoader& ml, Model& model) noexcept
+bool Vocab::load(ModelLoader& ml) noexcept
 {
     gguf_context *ctx = ml.getContext();
 
@@ -150,7 +153,7 @@ bool Vocab::load(ModelLoader& ml, Model& model) noexcept
     // determine the newline token: LLaMA "<0x0A>" == 10 == '\n', Falcon 193 == '\n'
     if (type == Type::SPM) {
         try {
-            lineFeedId = convertByteToToken('\n');
+            lineFeedId = byteToToken('\n');
         } catch (const std::exception &e) {
             spdlog::warn("%s: SPM vocabulary, but newline token not found: %s! Using special_pad_id instead.",
                 __func__, e.what());
@@ -158,10 +161,17 @@ bool Vocab::load(ModelLoader& ml, Model& model) noexcept
         }
     } else if (type == Type::WPM) {
         lineFeedId = specialPadId;
-    } else {
-        const std::vector<int> ids = llama_tokenize_internal("\xC4\x8A", false);// U+010A
+    } else if (type == Type::BPE) {
+        // FIXME: it's dirty to include tokenizer into common module
+        TokenizerBpe tokenizer;
+        std::vector<TokenId> ids;
+        tokenizer.tokenize("\xC4\x8A", *this, ids);// U+010A
         assert(!ids.empty() && "model vocab missing newline token");
         lineFeedId = ids[0];
+    } else {
+        spdlog::error("%s: unspported tokenizer for obtaining newline token", __func__);
+        assert(!"unsupported tokenizer");
+        return false;
     }
 
     // special tokens
@@ -256,7 +266,7 @@ bool Vocab::load(ModelLoader& ml, Model& model) noexcept
                         i++;
                     } else {
                         // skip over the rest of multibyte utf sequence
-                        i += utf - 1;
+                        i += int(utf - 1);
                     }
                 }
 
@@ -268,7 +278,7 @@ bool Vocab::load(ModelLoader& ml, Model& model) noexcept
                     size_t utf8StrLen = 0; // The number of utf characters
                     for (unsigned i = 0; i < token.length();) {
                         utf8StrLen++;
-                        i += utf8Len(token.at(i));
+                        i += int(utf8Len(token.at(i)));
                     }
 
                     // And skip the ones which are one character
@@ -305,6 +315,29 @@ bool Vocab::load(ModelLoader& ml, Model& model) noexcept
     }
 
     return true;
+}
+
+TokenId Vocab::byteToToken(uint8_t ch) const noexcept 
+{
+    assert(getType() != Type::NONE);
+    static const char * hex = "0123456789ABCDEF";
+    switch (getType()) {
+        case Type::SPM: {
+            const char buf[7] = { '<', '0', 'x', hex[ch >> 4], hex[ch & 15], '>', 0 };
+            auto token = tokenToId.find(buf);
+            if (token != tokenToId.end()) {
+                return (*token).second;
+            }
+            // Try to fall back to just the byte as a string
+            const char buf2[2] = { (char)ch, 0 };
+            return tokenToId.at(buf2);
+        }
+        case Type::WPM: 
+        case Type::BPE: 
+            return tokenToId.at(unicode_byte_to_utf8(ch));
+        default:
+            assert(false);
+    }
 }
 
 M_END_NAMESPACE

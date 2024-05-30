@@ -41,6 +41,7 @@ struct Vocab {
 
     std::unordered_map<Token, Id> specialTokensCache;
 
+    // FIXME: bpe ranks should be special to BPE vocab only.
     std::map<std::pair<std::string, std::string>, int> bpeRanks;
 
     // Default LLaMA special tokens
@@ -67,6 +68,7 @@ struct Vocab {
         return type;
     }
 
+    // Ditto
     int findBpeRank(const std::string & leftBytes, const std::string& rightBytes) const {
         assert(leftBytes.find(' ') == std::string::npos); // Both left and right bytes shouldn't contain spaces and newlines
         assert(leftBytes.find('\n') == std::string::npos);
@@ -81,7 +83,9 @@ struct Vocab {
         return it->second;
     }
 
-    bool load(ModelLoader &ml, Model &model) noexcept;
+    bool load(ModelLoader &ml) noexcept;
+
+    TokenId byteToToken(uint8_t ch) const noexcept;
 };
 
 M_END_NAMESPACE

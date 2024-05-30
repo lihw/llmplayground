@@ -25,7 +25,8 @@ public:
 
     virtual ~TokenizerBpe() override;
 
-    virtual int tokenize(const std::string& text, const Vocab& vocab, std::vector<TokenId>& out_tokens) noexcept final;
+    virtual int tokenize(const std::string& word, const Vocab& vocab, 
+            std::vector<TokenId>& out_tokens) noexcept final;
 
 private:
     /**

@@ -8,14 +8,19 @@
 #define M_MODEL_LOADER_H
 
 #include <common/m_defs.h>
-//#include <common/m_gguf.h>
+#include <common/m_gguf.h>
 
 #include <ggml/ggml.h>
 
+#include <fmt/core.h>
+
 #include <string>
 #include <vector>
+#include <stdexcept>
+
 
 M_BEGIN_NAMESPACE
+
 
 class ModelLoader {
 

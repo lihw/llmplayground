@@ -6,6 +6,8 @@
 
 #include <common/m_model_loader_gguf.h>
 
+#include <common/m_misc.h>
+
 #include <spdlog/spdlog.h>
 #include <fmt/core.h>
 
@@ -52,6 +54,7 @@ static const char * ggufGetVerName(GgufVersion version) {
     return "unknown";
 }
 
+/*
 static std::string ggufGetTensorShape(const std::vector<int64_t>& ne) {
     char buf[256];
     snprintf(buf, sizeof(buf), "%5" PRId64, ne.at(0));
@@ -60,7 +63,7 @@ static std::string ggufGetTensorShape(const std::vector<int64_t>& ne) {
     }
     return buf;
 }
-
+*/
 static std::string ggufGetTensorShape(const struct ggml_tensor * t) 
 {
     char buf[256];
@@ -84,7 +87,7 @@ static std::string ggufDataToStr(enum gguf_type type, const void * data, int i) 
         case GGUF_TYPE_FLOAT32: return std::to_string(((const float    *)data)[i]);
         case GGUF_TYPE_FLOAT64: return std::to_string(((const double   *)data)[i]);
         case GGUF_TYPE_BOOL:    return ((const bool *)data)[i] ? "true" : "false";
-        default:                return fmt::format("unknown type %d", type);
+        default:                return fmt::format("unknown type %d", int(type));
     }
 }
 
@@ -106,8 +109,8 @@ static std::string ggufKvToStr(const struct gguf_context * ctx_gguf, int i)
                     if (arr_type == GGUF_TYPE_STRING) {
                         std::string val = gguf_get_arr_str(ctx_gguf, i, j);
                         // escape quotes
-                        replace_all(val, "\\", "\\\\");
-                        replace_all(val, "\"", "\\\"");
+                        replaceAll(val, "\\", "\\\\");
+                        replaceAll(val, "\"", "\\\"");
                         ss << '"' << val << '"';
                     } else if (arr_type == GGUF_TYPE_ARRAY) {
                         ss << "???";
@@ -156,7 +159,7 @@ bool ModelLoaderGguf::load(const std::string &file, bool useMmap) noexcept
     // For subsidiary files, `meta` tensor data offset must not be used,
     // so we build a unified tensors index for weights.
     for (ggml_tensor* cur = ggml_get_first_tensor(ctx); cur; cur = ggml_get_next_tensor(ctx, cur)) {
-        mWeights.emplace_back(0, cur->name, mMeta, cur);
+        mWeights.emplace_back(uint16_t(0), cur->name, mMeta, cur);
     }
     //files.emplace_back(new llama_file(file.c_str(), "rb"));
     //contexts.emplace_back(ctx);
@@ -287,8 +290,9 @@ bool ModelLoaderGguf::load(const std::string &file, bool useMmap) noexcept
                     } break;
         }
 
+        // FIXME: GgufType value is invalid after OR op.
         // this is a way to mark that we have "guessed" the file type
-        ftype = (GgufType) (ftype | GgufType::GUESSED);
+        //ftype = (GgufType) (ftype | uint32_t(GgufType::GUESSED));
 
         {
             const int kid = gguf_find_key(mMeta, "general.file_type");
@@ -306,7 +310,7 @@ bool ModelLoaderGguf::load(const std::string &file, bool useMmap) noexcept
                 ? fmt::format("%s[%s,%d]", gguf_type_name(type), gguf_type_name(gguf_get_arr_type(mMeta, i)), gguf_get_arr_n(mMeta, i))
                 : gguf_type_name(type);
 
-            std::string value          = gguf_kv_to_str(mMeta, i);
+            std::string value          = ggufKvToStr(mMeta, i);
             const size_t MAX_VALUE_LEN = 40;
             if (value.size() > MAX_VALUE_LEN) {
                 value = fmt::format("%s...", value.substr(0, MAX_VALUE_LEN - 3).c_str());

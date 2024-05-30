@@ -84,6 +84,7 @@ static std::vector<uint16_t> unicode_cpt_to_utf16(uint32_t cp) {
 //    return result;
 //}
 
+/*
 static uint32_t cpt_from_utf16(const std::vector<uint16_t> & utf16, size_t & offset) {
     assert(offset < utf16.size());
     if (((utf16[0] >> 10) << 10) != 0xd800) {
@@ -100,6 +101,7 @@ static uint32_t cpt_from_utf16(const std::vector<uint16_t> & utf16, size_t & off
     offset += 2;
     return uint32_t(result);
 }
+*/
 
 //static std::vector<uint32_t> unicode_cpts_from_utf16(const std::vector<uint16_t> & utf16) {
 //    std::vector<uint32_t> result;
@@ -205,22 +207,22 @@ static std::unordered_map<std::string, uint8_t> unicode_utf8_to_byte_map() {
 std::string unicode_cpt_to_utf8(uint32_t cp) {
     std::string result;
     if (/* 0x00 <= cp && */ cp <= 0x7f) {
-        result.push_back(cp);
+        result.push_back(uint8_t(cp));
     }
     else if (0x80 <= cp && cp <= 0x7ff) {
-        result.push_back(0xc0 | ((cp >> 6) & 0x1f));
-        result.push_back(0x80 | (cp & 0x3f));
+        result.push_back(uint8_t(0xc0 | ((cp >> 6) & 0x1f)));
+        result.push_back(uint8_t(0x80 | (cp & 0x3f)));
     }
     else if (0x800 <= cp && cp <= 0xffff) {
-        result.push_back(0xe0 | ((cp >> 12) & 0x0f));
-        result.push_back(0x80 | ((cp >> 6) & 0x3f));
-        result.push_back(0x80 | (cp & 0x3f));
+        result.push_back(uint8_t(0xe0 | ((cp >> 12) & 0x0f)));
+        result.push_back(uint8_t(0x80 | ((cp >> 6) & 0x3f)));
+        result.push_back(uint8_t(0x80 | (cp & 0x3f)));
     }
     else if (0x10000 <= cp && cp <= 0x10ffff) {
-        result.push_back(0xf0 | ((cp >> 18) & 0x07));
-        result.push_back(0x80 | ((cp >> 12) & 0x3f));
-        result.push_back(0x80 | ((cp >> 6) & 0x3f));
-        result.push_back(0x80 | (cp & 0x3f));
+        result.push_back(uint8_t(0xf0 | ((cp >> 18) & 0x07)));
+        result.push_back(uint8_t(0x80 | ((cp >> 12) & 0x3f)));
+        result.push_back(uint8_t(0x80 | ((cp >> 6) & 0x3f)));
+        result.push_back(uint8_t(0x80 | (cp & 0x3f)));
     }
     else {
         throw std::invalid_argument("invalid codepoint");

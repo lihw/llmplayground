@@ -28,7 +28,9 @@ public:
     /**
      * Tokenize the input text into a list of tokens with given Vocab
      */
-    virtual int tokenize(const std::string& text, const Vocab& vocab, std::vector<TokenId>& out_tokens) noexcept = 0;
+    int tokenize(const std::string& text, 
+            const Vocab& vocab, 
+            std::vector<TokenId>& out_tokens) noexcept;
 
 protected:
     /**
@@ -47,14 +49,18 @@ protected:
      */
     std::vector<std::string> pretokenize(const std::string& text, const std::vector<std::string>& specials) noexcept;
 
-    static inline size_t utf8_len(char src) noexcept {
+    static inline size_t utf8Len(char src) noexcept {
         const size_t lookup[] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 3, 4 };
         uint8_t highbits = static_cast<uint8_t>(src) >> 4;
         return lookup[highbits];
     }
-
-    TokenId byteToToken(const Vocab& vocab, uint8_t ch);
 };
+
+extern int tokenize(const std::string& text, 
+            const Vocab& vocab, 
+            bool addSpecial,
+            bool parseSpecial,
+            std::vector<TokenId>& out_tokens) noexcept;
 
 M_END_NAMESPACE
 

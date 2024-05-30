@@ -13,9 +13,6 @@ M_BEGIN_NAMESPACE
 
 int TokenizerSpm::tokenize(const std::string& text, const Vocab& vocab, std::vector<TokenId>& out_tokens) noexcept
 {
-    // Create tokens from each word
-    out_tokens.clear();
-
     // Split the entire sentence into tokens instead of tokenizing
     // words (pre-tokenization) as in BPE.
     std::vector<Byte> bytes;
@@ -23,7 +20,7 @@ int TokenizerSpm::tokenize(const std::string& text, const Vocab& vocab, std::vec
     size_t index = 0;
     while (offset < text.size()) {
         Byte b;
-        size_t charLen = std::min(text.size() - offset, size_t(utf8_len(text[offset])));
+        size_t charLen = std::min(text.size() - offset, size_t(utf8Len(text[offset])));
         b.text = text.c_str() + offset;
         b.length = charLen;
         offset += b.length;
@@ -147,7 +144,7 @@ void TokenizerSpm::resegment(const Tokenizer::Byte &byte,
         // output any symbols that did not form tokens as bytes.
         output.reserve(output.size() + byte.length);
         for (int j = 0; j < (int)byte.length; ++j) {
-            Vocab::Id tokenId = byteToToken(vocab, byte.text[j]);
+            Vocab::Id tokenId = vocab.byteToToken(byte.text[j]);
             output.push_back(tokenId);
         }
         return;
