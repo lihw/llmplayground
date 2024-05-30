@@ -105,3 +105,26 @@ catch_discover_tests(
   "relaxed_constexpr."
   OUTPUT_SUFFIX
   .xml)
+
+ #
+add_executable(tokenizer_tests test_tokenizer.cpp)
+target_link_libraries(
+  tokenizer_tests
+  PRIVATE myproject::myproject_warnings
+          myproject::myproject_options
+          myproject::tokenizer
+          Catch2::Catch2WithMain)
+target_compile_definitions(tokenizer_tests PRIVATE -DCATCH_CONFIG_RUNTIME_STATIC_REQUIRE)
+
+catch_discover_tests(
+  tokenizer_tests
+  TEST_PREFIX
+  "tokenizer."
+  REPORTER
+  XML
+  OUTPUT_DIR
+  .
+  OUTPUT_PREFIX
+  "tokenizer."
+  OUTPUT_SUFFIX
+  .xml)
