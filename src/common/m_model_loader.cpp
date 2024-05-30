@@ -6,6 +6,8 @@
 
 #include <common/m_model_loader.h>
 
+#include <common/m_model_loader_gguf.h>
+
 #include <spdlog/spdlog.h>
 
 M_BEGIN_NAMESPACE
@@ -328,5 +330,43 @@ bool load_all_data(
 }
 
 #endif
+
+Model::~Model()
+{
+    delete m;
+}
+
+Model loadModel(const char* file) noexcept 
+{
+    unsigned curPercentage = 0;
+    auto progress_callback_user_data = &curPercentage;
+    auto progress_callback = [](float progress, void * ctx) {
+        unsigned * cur_percentage_p = (unsigned *) ctx;
+        unsigned percentage = (unsigned) (100 * progress);
+        while (percentage > *cur_percentage_p) {
+            *cur_percentage_p = percentage;
+            spdlog::info(".");
+            if (percentage >= 100) {
+                spdlog::info("\n");
+            }
+        }
+        return true;
+    };
+
+    const char* suffix = strrchr(file, '.');
+    if (strncmp(suffix, ".gguf", 5) == 0) {
+        ModelLoaderGguf* modelLoader = new ModelLoaderGguf();
+        if (!modelLoader->load(std::string(file), false)) {
+            spdlog::error("%s: failed to load model file %s", __func__, file);
+            delete modelLoader;
+            return Model{m: nullptr};
+        }
+
+        return Model{m: modelLoader};
+    } 
+
+    spdlog::error("%s: unsupported model format %s", __func__, file);
+    return Model{m: nullptr};
+}
 
 M_END_NAMESPACE

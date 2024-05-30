@@ -103,6 +103,20 @@ protected:
     //LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
 };
 
+// FIXME: move model related data from ModelLoader to Model
+struct Model {
+    ModelLoader* m = nullptr;
+
+    ~Model();
+
+    bool isValid() const 
+    {
+        return m != nullptr;
+    }
+};
+
+extern Model loadModel(const char* file) noexcept;
+
 M_END_NAMESPACE
 
 #endif // !M_MODEL_LOADER_H
