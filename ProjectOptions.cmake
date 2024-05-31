@@ -30,6 +30,8 @@ macro(myproject_setup_options)
 
   myproject_supports_sanitizers()
 
+  option(BUILD_SHARED_LIBS "Build using shared libraries" OFF)
+
   if(NOT PROJECT_IS_TOP_LEVEL OR myproject_PACKAGING_MAINTAINER_MODE)
     option(myproject_ENABLE_IPO "Enable IPO/LTO" OFF)
     option(myproject_WARNINGS_AS_ERRORS "Treat Warnings As Errors" OFF)

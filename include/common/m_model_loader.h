@@ -51,7 +51,7 @@ public:
 
     virtual ~ModelLoader();
 
-    virtual bool load(const std::string& file, bool useMmap) noexcept = 0;
+    virtual bool load(const std::string& file) noexcept = 0;
 
     const char* getTensorName(int i) const noexcept;
     Weight* getWeight(const char * name) noexcept;
@@ -104,14 +104,19 @@ protected:
 };
 
 // FIXME: move model related data from ModelLoader to Model
-struct Model {
-    ModelLoader* m = nullptr;
+class Model {
+public:
+    ModelLoader* ml = nullptr;
+    
+    Model(ModelLoader* ml = nullptr) {
+        this->ml = ml;
+    }
 
     ~Model();
 
     bool isValid() const 
     {
-        return m != nullptr;
+        return ml != nullptr;
     }
 };
 

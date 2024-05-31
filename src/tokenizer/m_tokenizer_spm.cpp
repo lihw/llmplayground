@@ -11,6 +11,14 @@
 
 M_BEGIN_NAMESPACE
 
+TokenizerSpm::TokenizerSpm() noexcept
+{
+}
+
+TokenizerSpm::~TokenizerSpm() 
+{
+}
+
 int TokenizerSpm::tokenize(const std::string& text, const Vocab& vocab, std::vector<TokenId>& out_tokens) noexcept
 {
     // Split the entire sentence into tokens instead of tokenizing

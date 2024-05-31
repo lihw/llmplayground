@@ -20,6 +20,8 @@
 
 #define M_END_NAMESPACE };
 
+M_BEGIN_NAMESPACE
+
 enum class Kv {
     GENERAL_ARCHITECTURE,
     GENERAL_QUANTIZATION_VERSION,
@@ -195,5 +197,7 @@ extern Arch getArchFromString(const std::string& name) noexcept;
 extern std::string getKvString(Kv kv, Arch arch) noexcept;
 
 extern std::string getKvString(Kv kv, const std::string& archName) noexcept;
+
+M_END_NAMESPACE
 
 #endif //! M_DEFS_H

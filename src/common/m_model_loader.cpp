@@ -333,11 +333,12 @@ bool load_all_data(
 
 Model::~Model()
 {
-    delete m;
+    delete ml;
 }
 
 Model loadModel(const char* file) noexcept 
 {
+#if 0
     unsigned curPercentage = 0;
     auto progress_callback_user_data = &curPercentage;
     auto progress_callback = [](float progress, void * ctx) {
@@ -352,21 +353,22 @@ Model loadModel(const char* file) noexcept
         }
         return true;
     };
+#endif
 
     const char* suffix = strrchr(file, '.');
     if (strncmp(suffix, ".gguf", 5) == 0) {
         ModelLoaderGguf* modelLoader = new ModelLoaderGguf();
-        if (!modelLoader->load(std::string(file), false)) {
+        if (!modelLoader->load(std::string(file))) {
             spdlog::error("%s: failed to load model file %s", __func__, file);
             delete modelLoader;
-            return Model{m: nullptr};
+            return Model();
         }
 
-        return Model{m: modelLoader};
+        return Model(modelLoader);
     } 
 
     spdlog::error("%s: unsupported model format %s", __func__, file);
-    return Model{m: nullptr};
+    return Model();
 }
 
 M_END_NAMESPACE

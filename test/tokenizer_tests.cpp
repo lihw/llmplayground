@@ -4,7 +4,7 @@
 #include <common/m_token.h>
 #include <common/m_vocab.h>
 
-#include <src/tokenizer/m_tokenizer.h>
+#include "../src/tokenizer/m_tokenizer_spm.h"
 
 #include <spdlog/spdlog.h>
 
@@ -21,7 +21,7 @@ TEST_CASE("tokenizer", "[bpe]")
     }
 
     m::Vocab vocab;
-    bool vocabLoaded = vocab.load(*model.m);
+    bool vocabLoaded = vocab.load(*model.ml);
     if (!vocabLoaded) {
         spdlog::error("fail to load vocab");
         REQUIRE(vocabLoaded == true);
@@ -29,4 +29,5 @@ TEST_CASE("tokenizer", "[bpe]")
 
     std::vector<m::TokenId> out_tokens;
     int numTokens = m::tokenize("hello, world", vocab, true, true, out_tokens);
+    REQUIRE(numTokens > 0);
 }

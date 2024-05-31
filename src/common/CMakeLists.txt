@@ -33,7 +33,7 @@ target_link_libraries(
 
 target_link_system_libraries(
   ${TARGET}
-  PRIVATE
+  PUBLIC
           CLI11::CLI11
           fmt::fmt
           spdlog::spdlog

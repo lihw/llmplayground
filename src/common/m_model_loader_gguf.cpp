@@ -134,12 +134,8 @@ ModelLoaderGguf::ModelLoaderGguf()
 {
 }
 
-bool ModelLoaderGguf::load(const std::string &file, bool useMmap) noexcept 
+bool ModelLoaderGguf::load(const std::string &file) noexcept 
 {
-    if (!ModelLoader::load(file, useMmap)) {
-        return false;
-    }
-
     ggml_context* ctx = NULL;
     gguf_init_params params = {
         /*.no_alloc = */ true,

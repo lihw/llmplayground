@@ -20,7 +20,7 @@ public:
 
     ~ModelLoaderGguf();
 
-    virtual bool load(const std::string& file, bool useMmap) noexcept final;
+    virtual bool load(const std::string& file) noexcept final;
 
 private:
     gguf_context* mMeta = nullptr;

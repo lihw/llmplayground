@@ -14,6 +14,15 @@
 
 M_BEGIN_NAMESPACE
 
+TokenizerBpe::TokenizerBpe() noexcept
+    : Tokenizer()
+{
+}
+
+TokenizerBpe::~TokenizerBpe() 
+{
+}
+
 int TokenizerBpe::tokenize(const std::string &word, const Vocab &vocab, std::vector<TokenId> &out_tokens) noexcept
 {
     auto bytes = tokenizeInternal(word, vocab); 

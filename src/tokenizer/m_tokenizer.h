@@ -28,9 +28,9 @@ public:
     /**
      * Tokenize the input text into a list of tokens with given Vocab
      */
-    int tokenize(const std::string& text, 
+    virtual int tokenize(const std::string& text, 
             const Vocab& vocab, 
-            std::vector<TokenId>& out_tokens) noexcept;
+            std::vector<TokenId>& out_tokens) noexcept = 0;
 
 protected:
     /**
