@@ -209,7 +209,7 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
         // sanity check
         {
             const int numTensorsLoaded = (int)mWeights.size();
-            if (mNumTensors != numTensorsLoaded) {
+            if (int(mNumTensors) != numTensorsLoaded) {
                 spdlog::error("corrupted model: %d tensors expected but %d found", mNumTensors, numTensorsLoaded);
                 return false;
             }
@@ -296,6 +296,9 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
                 ftype = (GgufType)gguf_get_val_u32(mMeta, kid);
             }
         }
+
+        
+        spdlog::info("%s: - type %4d tensors\n", __func__, int(ftype));
 
         spdlog::info("%s: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\n", __func__);
         for (int i = 0; i < mNumKv; i++) {

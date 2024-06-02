@@ -359,7 +359,7 @@ Model loadModel(const char* file) noexcept
     if (strncmp(suffix, ".gguf", 5) == 0) {
         ModelLoaderGguf* modelLoader = new ModelLoaderGguf();
         if (!modelLoader->load(std::string(file))) {
-            spdlog::error("%s: failed to load model file %s", __func__, file);
+            spdlog::error("{}: failed to load model file {}", __func__, file);
             delete modelLoader;
             return Model();
         }
@@ -367,7 +367,7 @@ Model loadModel(const char* file) noexcept
         return Model(modelLoader);
     } 
 
-    spdlog::error("%s: unsupported model format %s", __func__, file);
+    spdlog::error("{}: unsupported model format {}", __func__, file);
     return Model();
 }
 
