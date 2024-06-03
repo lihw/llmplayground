@@ -21,6 +21,8 @@ endif()
 
 include(${Catch2_SOURCE_DIR}/extras/Catch.cmake)
 
+find_package(Catch2 3 REQUIRED)
+
 # Provide a simple smoke test to make sure that the CLI works and can display a --help message
 add_test(NAME cli.has_help COMMAND intro --help)
 
@@ -38,7 +40,6 @@ target_link_libraries(
           myproject::myproject_options
           myproject::sample_library
           Catch2::Catch2WithMain
-          Catch2::Catch2
           )
 
 if(WIN32 AND BUILD_SHARED_LIBS)
