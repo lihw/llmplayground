@@ -9,14 +9,29 @@
 
 #include "m_defs.h"
 
+#include <string>
 
 M_BEGIN_NAMESPACE
 
-struct Token {
+using Token = std::string;
+using TokenId = int32_t;
+
+enum class TokenType {
+    UNDEFINED    = 0,
+    NORMAL       = 1,
+    UNKNOWN      = 2,
+    CONTROL      = 3,
+    USER_DEFINED = 4,
+    UNUSED       = 5,
+    BYTE         = 6,
 };
 
-class Vocab {
+struct TokenData {
+    Token text;
+    float score;
+    TokenType type;
 };
+
 
 M_END_NAMESPACE
 

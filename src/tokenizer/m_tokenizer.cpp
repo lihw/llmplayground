@@ -6,24 +6,62 @@
 
 #include "m_tokenizer.h"
 
+#include <common/m_vocab.h>
+#include <common/unicode.h>
+#include <common/m_misc.h>
+#include "m_tokenizer_bpe.h"
+#include "m_tokenizer_spm.h"
+
+#include <spdlog/spdlog.h>
+#include <fmt/core.h>
+
 #include <regex>
+
+#include <cassert>
 
 M_BEGIN_NAMESPACE
 
-std::vector<std::string> Tokenizer::pretokenize(const std::string& text, const std::vector<std::string>& specials) noexcept {
+int tokenize(const std::string& text, 
+            const Vocab& vocab, 
+            bool addSpecial,
+            bool parseSpecial,
+            std::vector<TokenId>& out_tokens) noexcept
+{
+    if (text.empty()) {
+        spdlog::warn("%s: empty input text", __func__);
+        return 0;
+    }
 
-    size_t start = 0;
+    size_t numTokens = text.length() + 2 * (addSpecial? 1 : 0);
+    out_tokens.reserve(numTokens);
+        
+    TokenizerSpm spm;
+    TokenizerBpe bpe;
 
-    auto findSpecial = [](const std::string& text, const std::vector<std::string>& specials, size_t pos) noexcept -> std::pair<size_t, std::string> {
-        for (const std::string &delimiter : specials) {
+    Tokenizer* tokenizer;
+
+    switch (vocab.type) {
+        case Vocab::Type::BPE: 
+            tokenizer = &bpe;
+            break;
+        case Vocab::Type::SPM: 
+            tokenizer = &spm;
+            break;
+        default:
+            spdlog::error("%s: unsupported tokenizer %d", int(vocab.type));
+            break;
+    }
+   
+    auto findSpecial = [](const std::string& text, const std::unordered_map<Token, TokenId>& specials, size_t pos) noexcept -> std::pair<size_t, TokenId> {
+        for (const auto& [delimiter, id]: specials) {
             size_t found = text.find(delimiter, pos);
             if((found != std::string::npos) ) {
-                return {found, delimiter};
+                return {found + delimiter.length(), id};
             }
         }
-        return {std::string::npos, ""};
+        return {std::string::npos, -1};
     };
-
+    
     auto splitWords = [](const std::string& text) noexcept {
         std::vector<std::string> words;
         std::regex pattern("<\\|startoftext\\|>|<\\|endoftext\\|>|'s|'t|'re|'ve|'m|'ll|'d|\\w+|\\d+|\\S+");
@@ -37,35 +75,71 @@ std::vector<std::string> Tokenizer::pretokenize(const std::string& text, const s
         
         return words;
     };
+        
+    if (addSpecial && vocab.specialAddBos != 0) {
+        assert(vocab.specialBosId != -1);
+        out_tokens.push_back(vocab.specialBosId);
+    }
     
-    // Split the text into chunks seperated with given special delimeters.
-    // And then split the chunk with gpt2-defined spaces
-    // GPT2 system regex:  's|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+
-    std::vector<std::string> out;
+    // Split the text into chunks separated by the special tokens
+    if (parseSpecial) {
+        size_t start = 0;
+        auto result = findSpecial(text, vocab.specialTokensCache, start);
+        auto found = result.first;
+        while (found != std::string::npos) {
+            if (found > start) {
+                auto fragment = text.substr(start, found - start);
+                if (vocab.type == Vocab::Type::SPM) {
+                    // without adding this leading whitespace, we do not get the same results as the original SPM tokenizer
+                    if (start == 0 && addSpecial) {
+                        fragment = " " + fragment;
+                    }
+                    escapeWhitespace(fragment);
+                    tokenizer->tokenize(fragment, vocab, out_tokens);
+                } else if (vocab.type == Vocab::Type::BPE) {
+                    auto words = splitWords(fragment);
+                    for (auto& w : words) {
+                        tokenizer->tokenize(w, vocab, out_tokens);
+                    }
+                } else {
+                    spdlog::error("%s: unsupported tokenizer type %d for tokenizing the text chunks", __func__, int(vocab.type));
+                }
+            }
 
-    auto result = findSpecial(text, specials, start);
-    auto found = result.first;
-    while (found != std::string::npos) {
-        if (found > start) {
-            const std::vector<std::string>& words = splitWords(text.substr(start, found - start));
-            out.insert(out.end(), words.begin(), words.end());
+            // Take the special dlimeter as a token too.
+            out_tokens.push_back(result.second);
+
+            start = result.first;
+            result = findSpecial(text, vocab.specialTokensCache, start);
+            found = result.first;
         }
-
-        // Take the special delimeter as a token too.
-        if (result.second == "\n") {
-            out.push_back("<0x0A>");
+    } else {
+        // without adding this leading whitespace, we do not get the same results as the original tokenizer
+        std::string fragment;
+        if (addSpecial) {
+            fragment = " " + text;
         } else {
-            out.push_back(result.second);
+            fragment = text;
         }
 
-        start += result.second.length();
-        result = findSpecial(text, specials, start);
-        found = result.first;
+        escapeWhitespace(fragment);
+        tokenizer->tokenize(fragment, vocab, out_tokens);
+    }
+        
+    if (vocab.type == Vocab::Type::SPM) {
+        if (addSpecial && vocab.specialAddEos == 1) {
+            assert(vocab.specialEosId != -1);
+            out_tokens.push_back(vocab.specialEosId);
+        }
+    } else if (vocab.type == Vocab::Type::BPE) {
+        assert(vocab.specialEosId == -1);
+    } else {
+        spdlog::error("%s: unsupported tokenizer type %d for dealing the tailing token", __func__, int(vocab.type));
+        return 0;
     }
 
-    return out;
+    return int(out_tokens.size());
 }
-
 
 M_END_NAMESPACE
 

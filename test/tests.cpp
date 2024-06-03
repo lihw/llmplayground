@@ -1,8 +1,13 @@
+#define CATCH_CONFIG_RUNNER
 #include <catch2/catch_test_macros.hpp>
 
 
 #include <myproject/sample_library.hpp>
 
+
+uint32_t factorial(uint32_t number) {
+    return number <= 1 ? number : factorial(number - 1) * number;
+}
 
 TEST_CASE("Factorials are computed", "[factorial]")
 {
