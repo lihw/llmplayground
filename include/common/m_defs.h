@@ -132,7 +132,9 @@ enum class Arch {
     UNKNOWN,
 };
 
-// model file types
+// The model weight data type
+// For the different quanzation methonds, check out
+// https://github.com/ggerganov/llama.cpp/pull/1684#issuecomment-1579252501
 enum class GgufType {
     ALL_F32              = 0,
     MOSTLY_F16           = 1,  // except 1d tensors
@@ -169,6 +171,8 @@ enum class GgufType {
 
     GUESSED = 1024, // not specified in the model file
 };
+
+extern const char* getGgufTypeName(GgufType type) noexcept;
 
 enum class KvOverrideType {
     BOOL = 1,

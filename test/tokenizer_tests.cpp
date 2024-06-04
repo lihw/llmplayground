@@ -12,11 +12,13 @@
 
 TEST_CASE("tokenizer", "[bpe]")
 {
-    const char* MODEL_FILE = "data/models/test.gguf";
+    spdlog::set_pattern("%v");
+
+    const char* MODEL_FILE = "Llama-2-7b-GGUF/llama-2-7b.gguf";
 
     m::Model model = m::loadModel(MODEL_FILE);
-    if (model.isValid()) {
-        spdlog::error("%s is invalid", MODEL_FILE);
+    if (!model.isValid()) {
+        spdlog::error("{} is invalid", MODEL_FILE);
         REQUIRE(model.isValid() == true);
     }
 

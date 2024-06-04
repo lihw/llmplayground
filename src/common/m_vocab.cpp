@@ -20,9 +20,9 @@ M_BEGIN_NAMESPACE
 
 bool Vocab::load(ModelLoader& ml) noexcept
 {
-    gguf_context *ctx = ml.getContext();
+    const auto LOG_HEAD = "Vocab::load()";
 
-    //const auto kv = LLM_KV(model.arch);
+    gguf_context *ctx = ml.getContext();
 
     // determine vocab type
     {
@@ -110,8 +110,8 @@ bool Vocab::load(ModelLoader& ml) noexcept
             specialMaskId = 103;
             addSpacePrefix = false;
         } else {
-            spdlog::warn("%s: unknown tokenizer: '%s'", __func__, tokenizerName.c_str());
-            spdlog::warn("%s: using default tokenizer: 'llama'", __func__);
+            spdlog::warn("{}: unknown tokenizer: '%s'", LOG_HEAD, tokenizerName.c_str());
+            spdlog::warn("{}: using default tokenizer: 'llama'", LOG_HEAD);
 
             type = Type::SPM;
         }
@@ -119,7 +119,7 @@ bool Vocab::load(ModelLoader& ml) noexcept
 
     const int tokenIdx = gguf_find_key(ctx, getKvString(Kv::TOKENIZER_LIST, ml.getArchName()).c_str());
     if (tokenIdx == -1) {
-        spdlog::error("cannot find tokenizer vocab in model file");
+        spdlog::error("{}: cannot find tokenizer vocab in model file", LOG_HEAD);
         return false;
     }
 
@@ -137,6 +137,7 @@ bool Vocab::load(ModelLoader& ml) noexcept
 
     const uint32_t numVocab = gguf_get_arr_n(ctx, tokenIdx);
     idToToken.resize(numVocab);
+    spdlog::info("{}: vocabulary size {}.\n", LOG_HEAD, numVocab);
     for (uint32_t i = 0; i < numVocab; i++) {
         std::string word = gguf_get_arr_str(ctx, tokenIdx, i);
         assert(unicode_cpts_from_utf8(word).size() > 0);
@@ -155,8 +156,8 @@ bool Vocab::load(ModelLoader& ml) noexcept
         try {
             lineFeedId = byteToToken('\n');
         } catch (const std::exception &e) {
-            spdlog::warn("%s: SPM vocabulary, but newline token not found: %s! Using special_pad_id instead.",
-                __func__, e.what());
+            spdlog::warn("{}: SPM vocabulary, but newline token not found: %s! Using special_pad_id instead.",
+                LOG_HEAD, e.what());
             lineFeedId = specialPadId;
         }
     } else if (type == Type::WPM) {
@@ -169,7 +170,7 @@ bool Vocab::load(ModelLoader& ml) noexcept
         assert(!ids.empty() && "model vocab missing newline token");
         lineFeedId = ids[0];
     } else {
-        spdlog::error("%s: unspported tokenizer for obtaining newline token", __func__);
+        spdlog::error("{}: unspported tokenizer for obtaining newline token", LOG_HEAD);
         assert(!"unsupported tokenizer");
         return false;
     }
@@ -198,14 +199,13 @@ bool Vocab::load(ModelLoader& ml) noexcept
                 continue;
             }
             if (newId >= idToToken.size()) {
-                spdlog::warn(
-                    "%s: bad special token: '%s' = %ud, using default id %d\n", __func__, key.c_str(), newId, id);
+                spdlog::warn("{}: bad special token: '{}' = {}, using default id {}", LOG_HEAD, key, newId, id);
             } else {
                 id = newId;
             }
         }
 
-        // Handle add_bos_token and add_eos_token
+        // Handle addbos token and addeos token
         {
             bool temp = true;
 
@@ -300,14 +300,14 @@ bool Vocab::load(ModelLoader& ml) noexcept
 
         if (specialTokensDefinitionMismatch
             || specialTokensCountFromVerification != specialTokensCountByType) {
-            spdlog::warn("%s: mismatch in special tokens definition ( %u/%zu vs %u/%zu ).\n",
-                __func__,
+            spdlog::warn("{}: mismatch in special tokens definition ( {}/{} vs {}/{} ).\n",
+                LOG_HEAD,
                 specialTokensCountFromVerification, 
                 idToToken.size(),
                 specialTokensCountByType,
                 idToToken.size());
         } else {
-            spdlog::info("%s: special tokens definition check successful ( %u/%zu ).\n",
+            spdlog::info("{}: special tokens definition check successful ( {}/{} ).\n",
                 __func__,
                 specialTokensCountFromVerification, 
                 idToToken.size());
@@ -338,6 +338,8 @@ TokenId Vocab::byteToToken(uint8_t ch) const noexcept
         default:
             assert(false);
     }
+
+    return -1;
 }
 
 M_END_NAMESPACE

@@ -27,8 +27,10 @@ int tokenize(const std::string& text,
             bool parseSpecial,
             std::vector<TokenId>& out_tokens) noexcept
 {
+    const auto LOG_HEAD = "tokenize()";
+
     if (text.empty()) {
-        spdlog::warn("%s: empty input text", __func__);
+        spdlog::warn("{}: empty input text", LOG_HEAD);
         return 0;
     }
 
@@ -38,7 +40,7 @@ int tokenize(const std::string& text,
     TokenizerSpm spm;
     TokenizerBpe bpe;
 
-    Tokenizer* tokenizer;
+    Tokenizer* tokenizer = nullptr;
 
     switch (vocab.type) {
         case Vocab::Type::BPE: 
@@ -48,8 +50,8 @@ int tokenize(const std::string& text,
             tokenizer = &spm;
             break;
         default:
-            spdlog::error("%s: unsupported tokenizer %d", int(vocab.type));
-            break;
+            spdlog::error("{}: unsupported tokenizer {}", __func__, int(vocab.type));
+            return -1;
     }
    
     auto findSpecial = [](const std::string& text, const std::unordered_map<Token, TokenId>& specials, size_t pos) noexcept -> std::pair<size_t, TokenId> {
