@@ -308,7 +308,7 @@ bool Vocab::load(ModelLoader& ml) noexcept
                 idToToken.size());
         } else {
             spdlog::info("{}: special tokens definition check successful ( {}/{} ).\n",
-                __func__,
+                LOG_HEAD,
                 specialTokensCountFromVerification, 
                 idToToken.size());
         }
