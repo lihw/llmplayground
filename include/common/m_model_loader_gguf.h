@@ -23,9 +23,6 @@ public:
     virtual bool load(const std::string& file) noexcept final;
 
 private:
-    gguf_context* mMeta = nullptr;
-
-    int mNumKv = 0;
     GgufVersion mVersion = GgufVersion::V1;
     
 };

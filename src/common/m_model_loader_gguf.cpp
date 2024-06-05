@@ -136,6 +136,8 @@ ModelLoaderGguf::ModelLoaderGguf()
 
 bool ModelLoaderGguf::load(const std::string &file) noexcept 
 {
+    constexpr auto LOG_HEAD = "ModelLoaderGguf:load()";
+
     ggml_context* ctx = NULL;
     gguf_init_params params = {
         /*.no_alloc = */ true,
@@ -144,7 +146,7 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
 
     mMeta = gguf_init_from_file(file.c_str(), params);
     if (!mMeta) {
-        spdlog::error("%s: failed to load model from %s\n", __func__, file.c_str());
+        spdlog::error("{}: failed to load model from {}\n", LOG_HEAD, file.c_str());
         return false;
     }
 
@@ -168,17 +170,17 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
         uint16_t idx = 0;
         getKey(Kv::SPLIT_NO, idx);
         if (idx != 0) {
-            spdlog::error("illegal split file: %d, model must be loaded with the first split", idx);
+            spdlog::error("{}: illegal split file: {}, model must be loaded with the first split", LOG_HEAD, idx);
             return false;
         }
 
         char splitPrefix[PATH_MAX] = {0};
         if (!ggufSplitPrefix(splitPrefix, sizeof(splitPrefix), file.c_str(), idx, numSplits)) {
-            spdlog::error("invalid split file: %s", file.c_str());
+            spdlog::error("{}: invalid split file: {}", LOG_HEAD, file.c_str());
             return false;
         }
 
-        spdlog::info("%s: loading additional %d GGUFs\n", __func__, numSplits);
+        spdlog::info("{}: loading additional {} GGUFs", LOG_HEAD, numSplits);
 
         char splitPath[PATH_MAX] = {0};
         for (idx = 1; idx < numSplits; idx++) {
@@ -190,7 +192,7 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
             };
             gguf_context * ctxGguf = gguf_init_from_file(splitPath, splitParams);
             if (!ctxGguf) {
-                spdlog::error("%s: failed to load GGUF split from %s\n", __func__, splitPath);
+                spdlog::error("{}: failed to load GGUF split from {}", LOG_HEAD, splitPath);
                 return false;
             }
 
@@ -215,27 +217,25 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
             }
         }
 
-        spdlog::info("%s: additional %d GGUFs metadata loaded.\n",  __func__, numSplits - 1);
+        spdlog::info("{}: additional {} GGUFs metadata loaded.\n", LOG_HEAD, numSplits - 1);
     } 
 
 
-    mNumKv      = gguf_get_n_kv(mMeta);
-    mNumTensors = mWeights.size();
-    mVersion    = (GgufVersion)(gguf_get_version(mMeta));
+    mNumKeyValues  = gguf_get_n_kv(mMeta);
+    mNumTensors    = mWeights.size();
+    mVersion       = (GgufVersion)(gguf_get_version(mMeta));
 
     for (auto & w : mWeights) {
         mNumElements += ggml_nelements(w.tensor);
         mNumBytes    += ggml_nbytes(w.tensor);
     }
 
-    spdlog::info("%s: loaded meta data with %d key-value pairs and %d tensors from %s (version %s)\n",
-                __func__, mNumKv, mNumTensors, file.c_str(), ggufGetVerName(mVersion));
+    spdlog::info("{}: loaded meta data with {} key-value pairs and {} tensors from {} (version {})\n",
+            LOG_HEAD, mNumKeyValues, mNumTensors, file.c_str(), ggufGetVerName(mVersion));
         
     // determine file type based on the number of tensors for each quantization and print meta data
     // TODO: make optional
     {
-        GgufType ftype;
-
         std::map<enum ggml_type, uint32_t> typeCount;
 
         uint32_t maxNumType = 0;
@@ -253,80 +253,42 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
             }
 
             const uint16_t sid = mWeights.at(i).idx;
-            spdlog::info("%s: - tensor %4d, split %2d: %32s %-8s [ %s ]\n", __func__, i, sid, 
+            spdlog::info("{}: tensor {:d}, split {:2d}: {:28s} {:6s} [{}]", LOG_HEAD, i, sid, 
                     ggml_get_name(tensor), ggml_type_name(type), ggufGetTensorShape(tensor).c_str());
         }
-
-        switch (typeMax) {
-            case GGML_TYPE_F32:     ftype = GgufType::ALL_F32;        break;
-            case GGML_TYPE_F16:     ftype = GgufType::MOSTLY_F16;     break;
-            case GGML_TYPE_Q4_0:    ftype = GgufType::MOSTLY_Q4_0;    break;
-            case GGML_TYPE_Q4_1:    ftype = GgufType::MOSTLY_Q4_1;    break;
-            case GGML_TYPE_Q5_0:    ftype = GgufType::MOSTLY_Q5_0;    break;
-            case GGML_TYPE_Q5_1:    ftype = GgufType::MOSTLY_Q5_1;    break;
-            case GGML_TYPE_Q8_0:    ftype = GgufType::MOSTLY_Q8_0;    break;
-            case GGML_TYPE_Q2_K:    ftype = GgufType::MOSTLY_Q2_K;    break;
-            case GGML_TYPE_Q3_K:    ftype = GgufType::MOSTLY_Q3_K_M;  break;
-            case GGML_TYPE_Q4_K:    ftype = GgufType::MOSTLY_Q4_K_M;  break;
-            case GGML_TYPE_Q5_K:    ftype = GgufType::MOSTLY_Q5_K_M;  break;
-            case GGML_TYPE_Q6_K:    ftype = GgufType::MOSTLY_Q6_K;    break;
-            case GGML_TYPE_IQ2_XXS: ftype = GgufType::MOSTLY_IQ2_XXS; break;
-            case GGML_TYPE_IQ2_XS:  ftype = GgufType::MOSTLY_IQ2_XS;  break;
-            case GGML_TYPE_IQ2_S:   ftype = GgufType::MOSTLY_IQ2_S;   break;
-            case GGML_TYPE_IQ3_XXS: ftype = GgufType::MOSTLY_IQ3_XXS; break;
-            case GGML_TYPE_IQ1_S:   ftype = GgufType::MOSTLY_IQ1_S;   break;
-            case GGML_TYPE_IQ1_M:   ftype = GgufType::MOSTLY_IQ1_M;   break;
-            case GGML_TYPE_IQ4_NL:  ftype = GgufType::MOSTLY_IQ4_NL;  break;
-            case GGML_TYPE_IQ4_XS:  ftype = GgufType::MOSTLY_IQ4_XS;  break;
-            case GGML_TYPE_IQ3_S:   ftype = GgufType::MOSTLY_IQ3_S;   break;
-            default:
-                    {
-                        spdlog::warn("%s: unknown type %s\n", __func__, ggml_type_name(typeMax));
-                        ftype = GgufType::ALL_F32;
-                    } break;
-        }
-
-        // FIXME: GgufType value is invalid after OR op.
-        // this is a way to mark that we have "guessed" the file type
-        //ftype = (GgufType) (ftype | uint32_t(GgufType::GUESSED));
-
-        {
-            const int kid = gguf_find_key(mMeta, "general.file_type");
-            if (kid >= 0) {
-                ftype = (GgufType)gguf_get_val_u32(mMeta, kid);
-            }
-        }
-
         
-        spdlog::info("%s: - type %4d tensors\n", __func__, int(ftype));
-
-        spdlog::info("%s: Dumping metadata keys/values. Note: KV overrides do not apply in this output.\n", __func__);
-        for (int i = 0; i < mNumKv; i++) {
-            const char* name            = gguf_get_key(mMeta, i);
-            const enum gguf_type type   = gguf_get_kv_type(mMeta, i);
-            const std::string type_name =
-                type == GGUF_TYPE_ARRAY
-                ? fmt::format("%s[%s,%d]", gguf_type_name(type), gguf_type_name(gguf_get_arr_type(mMeta, i)), gguf_get_arr_n(mMeta, i))
-                : gguf_type_name(type);
-
-            std::string value          = ggufKvToStr(mMeta, i);
-            const size_t MAX_VALUE_LEN = 40;
-            if (value.size() > MAX_VALUE_LEN) {
-                value = fmt::format("%s...", value.substr(0, MAX_VALUE_LEN - 3).c_str());
-            }
-
-            spdlog::info("%s: - kv %3d: %42s %-16s = %s\n", __func__, i, name, type_name.c_str(), value.c_str());
-        }
-
-        // print type counts
-        for (auto & kv : typeCount) {
-            if (kv.second == 0) {
+        for (auto& [type, number] : typeCount) {
+            if (number == 0) {
                 continue;
             }
-
-            spdlog::info("%s: - type %4s: %4d tensors\n", __func__, ggml_type_name(kv.first), kv.second);
+            spdlog::info("{}: type {:4s}: {:4d} tensors", LOG_HEAD, ggml_type_name(type), number);
         }
+        spdlog::info("{}: total:     {:4d} tensors\n", LOG_HEAD, mNumTensors);
+
+
+        spdlog::info("{}: dumping metadata keys/values. Note: KV overrides do not apply in this output.", LOG_HEAD);
+        for (int i = 0; i < mNumKeyValues; i++) {
+            const char* name            = gguf_get_key(mMeta, i);
+            const enum gguf_type type   = gguf_get_kv_type(mMeta, i);
+            const std::string typeName  =
+                type == GGUF_TYPE_ARRAY
+                ? fmt::format("{}[{},{}]", gguf_type_name(type), gguf_type_name(gguf_get_arr_type(mMeta, i)), gguf_get_arr_n(mMeta, i))
+                : gguf_type_name(type);
+
+            std::string value           = ggufKvToStr(mMeta, i);
+            const size_t MAX_VALUE_LEN  = 40;
+            if (strncmp(name, "general.file_type", 16) == 0) {
+                uint32_t v = ((uint32_t*)gguf_get_val_data(mMeta, i))[0];
+                value = getGgufTypeName(GgufType(v));
+            } else if (value.size() > MAX_VALUE_LEN) {
+                value = fmt::format("{}...", value.substr(0, MAX_VALUE_LEN - 3));
+            }
+
+            spdlog::info("{}: {:3d}: {:42s} {:<16s} = {}", LOG_HEAD, i, name, typeName, value);
+        }
+        spdlog::info("{}: total {} key/values\n", LOG_HEAD, mNumKeyValues);
     }
+
 
     //if (!llama_mmap::SUPPORTED) {
     //    spdlog::warn("%s: mmap is not supported on this platform\n", __func__);

@@ -12,22 +12,21 @@
 
 TEST_CASE("tokenizer", "[bpe]")
 {
-    const char* MODEL_FILE = "data/models/test.gguf";
+    spdlog::set_pattern("%v");
+
+    const char* MODEL_FILE = "Llama-2-7b-GGUF/llama-2-7b.gguf";
 
     m::Model model = m::loadModel(MODEL_FILE);
-    if (model.isValid()) {
-        spdlog::error("%s is invalid", MODEL_FILE);
-        REQUIRE(model.isValid() == true);
-    }
+    REQUIRE(model.isValid() == true);
 
     m::Vocab vocab;
     bool vocabLoaded = vocab.load(*model.ml);
-    if (!vocabLoaded) {
-        spdlog::error("fail to load vocab");
-        REQUIRE(vocabLoaded == true);
-    }
+    REQUIRE(vocabLoaded == true);
 
     std::vector<m::TokenId> out_tokens;
     int numTokens = m::tokenize("hello, world", vocab, true, true, out_tokens);
-    REQUIRE(numTokens > 0);
+    REQUIRE(numTokens == 4);
+
+    REQUIRE(out_tokens == std::vector<m::TokenId>{1, 22172, 29892, 3186});
+
 }

@@ -6,6 +6,9 @@
 
 #include "m_tokenizer_spm.h"
 
+#include <fmt/core.h>
+#include <spdlog/spdlog.h>
+
 #include <vector>
 #include <string>
 
@@ -127,6 +130,7 @@ int TokenizerSpm::tokenize(const std::string& text, const Vocab& vocab, std::vec
         resegment(byte, bytes, revMerge, vocab, out_tokens);
     }
 
+
     return int(out_tokens.size());
 }
 
@@ -139,11 +143,12 @@ void TokenizerSpm::resegment(const Tokenizer::Byte &byte,
     auto text = std::string(byte.text, byte.length);
     auto token = vocab.tokenToId.find(text);
 
+    
     if (token != vocab.tokenToId.end()) {
         output.push_back((*token).second);
         return;
     }
-    
+
     // If the token is not found in vocab.
 
     const auto p = revMerge.find(text);

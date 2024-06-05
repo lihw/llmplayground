@@ -81,7 +81,7 @@ public:
 
     template<typename T>
     bool getKey(const Kv kid, T& result, const bool required = true) {
-        return getKey(Kv(kid), result, required);
+        return getKey(getKvString(kid, mArchName), result, required);
     }
 
 protected:

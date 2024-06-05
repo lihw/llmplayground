@@ -122,7 +122,7 @@ namespace GGUFMeta
 
             if (kt != GKV::gt)
             {
-                throw std::runtime_error(format("key %s has wrong type %s but expected type %s",
+                throw std::runtime_error(fmt::format("key {} has wrong type {} but expected type {}",
                                                 gguf_get_key(ctx, k), gguf_type_name(kt), gguf_type_name(GKV::gt)));
             }
             return GKV::getter(ctx, k);
@@ -150,7 +150,7 @@ namespace GGUFMeta
             }
             if (ovrd->tag == expected_type)
             {
-                LLAMA_LOG_INFO("%s: Using metadata override (%5s) '%s' = ",
+                spdlog::info("%s: Using metadata override (%5s) '%s' = ",
                                __func__, override_type_to_str(ovrd->tag), ovrd->key);
                 switch (ovrd->tag)
                 {
@@ -177,7 +177,7 @@ namespace GGUFMeta
                 }
                 return true;
             }
-            LLAMA_LOG_WARN("%s: Warning: Bad metadata override type for key '%s', expected %s but got %s\n",
+            spdlog::warn("%s: Warning: Bad metadata override type for key '%s', expected %s but got %s\n",
                            __func__, ovrd->key, override_type_to_str(expected_type), override_type_to_str(ovrd->tag));
             return false;
         }
@@ -200,7 +200,7 @@ namespace GGUFMeta
         {
             if (validate_override(KvOverrideType::INT, ovrd))
             {
-                target = ovrd->intValue;
+                target = uint16_t(ovrd->intValue);
                 return true;
             }
             return false;
