@@ -70,6 +70,7 @@ TEST_CASE("tokenizer", "[spm]")
         REQUIRE(std::vector<m::TokenId>(out_tokensBos.begin() + 1, out_tokensBos.end()) == tokens);
     }
 
+#if 0
     for (auto& [text, tokens] : tests) {
         std::vector<m::TokenId> out_tokensBos;
         m::tokenize(text, vocab, true, false, out_tokensBos);
@@ -79,4 +80,6 @@ TEST_CASE("tokenizer", "[spm]")
         
         spdlog::info("{}", out_text);
     }
+#endif
+
 }

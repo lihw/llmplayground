@@ -170,6 +170,10 @@ void detokenize(const std::vector<TokenId>& tokens,
 
     out_text = "";
 
+    if (tokens.empty()) {
+        return;
+    }
+
     for (size_t i = addSpecial? 1 : 0; i < tokens.size(); ++i) {
         auto& t = tokens[i];
 
