@@ -62,6 +62,11 @@ extern int tokenize(const std::string& text,
             bool parseSpecial,
             std::vector<TokenId>& out_tokens) noexcept;
 
+extern void detokenize(const std::vector<TokenId>& tokens,
+            const Vocab& vocab,
+            bool addSpecial,
+            std::string& out_text) noexcept;
+
 M_END_NAMESPACE
 
 #endif // !M_TOKENIZER_H

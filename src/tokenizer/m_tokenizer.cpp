@@ -16,6 +16,10 @@
 #include <fmt/core.h>
 
 #include <regex>
+#include <vector>
+#include <numeric>
+#include <string_view>
+#include <algorithm>
 
 #include <cassert>
 
@@ -84,7 +88,7 @@ int tokenize(const std::string& text,
     auto tokenizeInternal = [&](std::string& fragment) -> void {
         if (vocab.type == Vocab::Type::SPM) {
             // without adding this leading whitespace, we do not get the same results as the original SPM tokenizer
-            if (start == 0 && addSpecial) {
+            if (start == 0 && vocab.addSpacePrefix) {
                 fragment = " " + fragment;
             }
             escapeWhitespace(fragment);
@@ -142,6 +146,8 @@ int tokenize(const std::string& text,
         return 0;
     }
     
+    // Print out the tokenization result.
+    /*
     if (spdlog::get_level() <= spdlog::level::level_enum::info) {
         spdlog::info("The output tokens:");
         for (auto& t : out_tokens) {
@@ -150,8 +156,41 @@ int tokenize(const std::string& text,
         }
         fprintf(stdout, "\n\n");
     }
+    */
 
     return int(out_tokens.size());
+}
+
+void detokenize(const std::vector<TokenId>& tokens,
+            const Vocab& vocab, 
+            bool addSpecial,
+            std::string& out_text) noexcept
+{
+    auto LOG_HEAD = "detokenize()";
+
+    out_text = "";
+
+    if (tokens.empty()) {
+        return;
+    }
+
+    for (size_t i = addSpecial? 1 : 0; i < tokens.size(); ++i) {
+        auto& t = tokens[i];
+
+        if (t >= vocab.idToToken.size()) {
+            spdlog::warn("{}: the token {} can't be found in vocab. It seems using a mismatched vocab",
+                    LOG_HEAD, t);
+            continue;
+        }
+        out_text += vocab.idToToken[t].text;
+    }
+
+    if (vocab.type == Vocab::Type::SPM) {
+        unescapeWhitespace(out_text);
+        if (vocab.addSpacePrefix) {
+            out_text = out_text.substr(1);
+        }
+    }
 }
 
 M_END_NAMESPACE
