@@ -7,6 +7,8 @@
 #include <common/m_model_loader_gguf.h>
 
 #include <common/m_misc.h>
+#include <common/m_model.h>
+#include <common/m_vocab.h>
 
 #include <spdlog/spdlog.h>
 #include <fmt/core.h>
@@ -91,7 +93,7 @@ static std::string ggufDataToStr(enum gguf_type type, const void * data, int i) 
     }
 }
 
-static std::string ggufKvToStr(const struct gguf_context * ctx_gguf, int i) 
+std::string ggufKvToStr(const struct gguf_context * ctx_gguf, int i) 
 {
     const enum gguf_type type = gguf_get_kv_type(ctx_gguf, i);
 
@@ -305,6 +307,43 @@ ModelLoaderGguf::~ModelLoaderGguf()
     if (mMeta) {
         gguf_free(mMeta);
     }
+}
+
+Model* ModelLoaderGguf::build() noexcept
+{
+    Model* model = new Model();
+
+    //
+    // load parameters
+    //
+
+    auto& params = model->params;
+
+
+    //
+    // load model vocab
+    // 
+    model->vocab.load(*this);
+    if (params.vocabOnly) {
+        spdlog::info("{}: vocab only - skipping tensors", LOG_HEAD);
+        return model;
+    }
+
+    //
+    // load tensors
+    //
+    if (!llm_load_tensors(
+            ml, model, params.n_gpu_layers, params.split_mode,  params.main_gpu, params.tensor_split, params.use_mlock,
+            params.progress_callback, params.progress_callback_user_data
+        )) {
+            return nullptr;
+        }
+    } catch (const std::exception & err) {
+        spdlog::error("{}: error loading model: {}\n", LOG_HEAD, err.what());
+        return nullptr;
+    }
+
+    return model;
 }
 
 M_END_NAMESPACE

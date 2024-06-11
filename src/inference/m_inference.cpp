@@ -6,22 +6,30 @@
 
 #include "m_inference.h"
 
+#include <ggml/ggml.h>
+#include <spdlog/spdlog.h>
+
+#include <algorithm>
+
+#include <cassert>
+
 M_BEGIN_NAMESPACE
 
+#undef min
+#undef max
 
-int32_t Inference::decode(Batch& batch)
+int32_t Inference::decode(Session& session, Batch& batch)
 {
     const auto LOG_HEAD = "Inference::decode()";
 
     const uint32_t numTokens = (uint32_t)(batch.tokens.size());
     
-    if (n_tokens_all == 0) {
+    if (batch.tokens.empty() && batch.embeds.empty()) {
         spdlog::error("{}: tokens == 0", LOG_HEAD);
         return -1;
     }
 
-    const auto& model   = lctx.model;
-    const auto& hparams = model.hparams;
+    const auto& hparams = mModel.hparams;
     const auto& cparams = lctx.cparams;
 
     assert((!batch.tokens.empty() && batch.embeds.empty()) || (batch.tokens.empty() && !batch.embeds.empty())); // NOLINT
@@ -31,21 +39,22 @@ int32_t Inference::decode(Batch& batch)
 
     assert((cparams.causal_attn || cparams.n_ubatch >= numTokens) && "non-causal attention requires n_ubatch >= n_tokens");
 
-    if (mComputeStartUs == 0) {
-        mComputeStartUs = ggml_time_us();
+    if (session.computeStartUs == 0) {
+        session.computeStartUs = ggml_time_us();
     }
-    numQueuedTokens += numTokens;
+    session.numQueuedTokens += numTokens;
 
-    auto & kv_self = lctx.kv_self;
+    auto& kv_self = session.kv_self;
 
     // count outputs
-    uint32_t n_outputs_prev = 0;
     uint32_t numOutputs = 0;
-    if (batch.logits) {
+    if (!batch.logits.empty()) {
+        // The outputs are marked by the batch's logit array.
         for (uint32_t i = 0; i < numTokens; ++i) {
             numOutputs += batch.logits[i] != 0;
         }
-    } else if (numLogitsAll || (cparams.embeddings && cparams.pooling_type != LLAMA_POOLING_TYPE_NONE)) {
+    } else if (session.allLogits || (cparams.embeddings && cparams.pooling_type != LLAMA_POOLING_TYPE_NONE)) {
+        // One output per each token.
         numOutputs = numTokens;
     } else {
         // keep last output only
@@ -55,36 +64,36 @@ int32_t Inference::decode(Batch& batch)
     const int64_t n_embd  = hparams.n_embd;
     const int64_t n_vocab = hparams.n_vocab;
 
-
     // reserve output buffer
     if (llama_output_reserve(lctx, numOutputs) < numOutputs) {
-        spdlog::error("{}: could not reserve space for batch with {} outputs\n", LOG_HEAD, n_outputs);
+        spdlog::error("{}: could not reserve space for batch with {} outputs\n", LOG_HEAD, numOutputs);
         return -2;
     }
 
     // set output mappings
-    if (batch.logits) {
+    if (!batch.logits.empty()) {
         int32_t logitsIndex = 0;
         for (uint32_t i = 0; i < numTokens; ++i) {
             if (batch.logits[i]) {
-                lctx.output_ids[i] = logitsIndex;
+                session.outputIds[i] = logitsIndex;
             }
         }
     } else {
         for (uint32_t i = 0; i < numOutputs; ++i) {
-            lctx.output_ids[i] = i;
+            session.outputIds[i] = i;
         }
     }
 
+    uint32_t numPrevOutputs = 0;
     const auto n_ubatch = cparams.n_ubatch;
     for (uint32_t curToken = 0; curToken < numTokens; curToken += n_ubatch) {
         const uint32_t curNumTokens = std::min(n_ubatch, numTokens - curToken);
         Batch curBatch;
-        curBatch.tokens = std::vector<auto>(batch.tokens.begin() + curToken, batch.tokens.end());
-        curBatch.embeds = std::vector<auto>(batch.embeds.begin() + curToken, batch.embeds.end());
-        curBatch.pos    = std::vector<auto>(batch.pos.begin() + curToken, batch.pos.end());
-        curBatch.seqId  = std::vector<auto>(batch.seqIds.begin() + curToken, batch.seqIds.end());
-        curBatch.logits = std::vector<auto>(batch.logits.begin() + curToken, batch.logits.end());
+        curBatch.tokens = std::vector<Token>(batch.tokens.begin() + curToken, batch.tokens.end());
+        curBatch.embeds = std::vector<float>(batch.embeds.begin() + curToken, batch.embeds.end());
+        curBatch.pos    = std::vector<Pos>(batch.pos.begin() + curToken, batch.pos.end());
+        curBatch.seqIds = std::vector<std::vector<SeqId>>(batch.seqIds.begin() + curToken, batch.seqIds.end());
+        curBatch.logits = std::vector<int8_t>(batch.logits.begin() + curToken, batch.logits.end());
             ///* .all_pos_0  = */ batch_all.all_pos_0 + (llama_pos) cur_token*batch_all.all_pos_1,
             ///* .all_pos_1  = */ batch_all.all_pos_1,
             ///* .all_seq_id = */ batch_all.all_seq_id,
@@ -93,15 +102,15 @@ int32_t Inference::decode(Batch& batch)
         {
             int32_t numNewOutputs = 0;
 
-            if (curBatch.logits) {
-                for (uint32_t i = 0; i < curNumToksn ; i++) {
-                    newNewOutputs += curBatch.logits[i] != 0;
+            if (!curBatch.logits.empty()) {
+                for (uint32_t i = 0; i < curNumTokens ; i++) {
+                    numNewOutputs += curBatch.logits[i] != 0;
                 }
             } else if (numOutputs == numTokens) {
                 numNewOutputs = numTokens;
             } else {
                 // keep last output only
-                if (curToken + numCurTokens >= numTokens) {
+                if (curToken + curNumTokens >= numTokens) {
                     numNewOutputs = 1;
                 }
             }
@@ -118,14 +127,12 @@ int32_t Inference::decode(Batch& batch)
         if (curBatch.pos.empty()) {
             curBatch.pos.resize(curNumTokens);
             for (uint32_t i = 0; auto &p : curBatch.pos) {
-                pos = curBatch.all_pos_0 + i * curBatch.all_pos_1;
+                curBatch.pos[i] = curBatch.all_pos_0 + i * curBatch.all_pos_1;
             }
-
-            curBatch.pos.swap(pos);
         }
 
         if (curBatch.seqIds.empty()) {
-            curBatch.seqIds.resize(curNewTokens);
+            curBatch.seqIds.resize(curNumTokens);
             for (auto &s : curBatch.seqIds) {
                 s.resize(1);
                 s[0] = curBatch.all_seq_id;
@@ -138,11 +145,11 @@ int32_t Inference::decode(Batch& batch)
 
             // if we have enough unused cells before the current head ->
             //   better to start searching from the beginning of the cache, hoping to fill it
-            if (kv_self.head > kv_self.used + 2*n_tokens) {
+            if (kv_self.head > kv_self.used + 2 * curNumTokens) {
                 kv_self.head = 0;
             }
 
-            if (!llama_kv_cache_find_slot(kv_self, u_batch)) {
+            if (!_findKvCacheSlot(kv_self, curBatch)) {
                 return 1;
             }
 
@@ -157,10 +164,10 @@ int32_t Inference::decode(Batch& batch)
 
         //printf("kv_self.n = %5d, kv_self.used = %5d, kv_self.head = %5d\n", kv_self.n, kv_self.used, kv_self.head);
 
-        ggml_backend_sched_reset(lctx.sched);
-        ggml_backend_sched_set_eval_callback(lctx.sched, lctx.cparams.cb_eval, lctx.cparams.cb_eval_user_data);
+        ggml_backend_sched_reset(session.sched);
+        ggml_backend_sched_set_eval_callback(session.sched, lctx.cparams.cb_eval, lctx.cparams.cb_eval_user_data);
 
-        ggml_cgraph * gf = llama_build_graph(lctx, curBatch, false);
+        ggml_cgraph * gf = llama_build_graph(session, curBatch, false);
 
         // the output is always the last tensor in the graph
         struct ggml_tensor * res  = gf->nodes[gf->n_nodes - 1];
@@ -176,7 +183,7 @@ int32_t Inference::decode(Batch& batch)
             // token or sequence embeddings
             embd = gf->nodes[gf->n_nodes - 1];
 
-            GGML_ASSERT(strcmp(embd->name, "result_embd") == 0 || strcmp(embd->name, "result_embd_pooled") == 0);
+            assert(strcmp(embd->name, "result_embd") == 0 || strcmp(embd->name, "result_embd_pooled") == 0);
         } else if (cparams.embeddings) {
             // the embeddings could be in the second to last tensor, or any of the previous tensors
             int i_embd = gf->n_nodes - 2;
@@ -207,20 +214,19 @@ int32_t Inference::decode(Batch& batch)
         //       with the BLAS calls. need a better solution
         // MoE Special Case: This logic applies when hparams.n_expert == 0, i.e. the model is NOT an MoE model. When an MoE is
         //                   being processed then Accelerate/BLAS will not be involved, so capping would limit performance.
-        if (n_tokens >= 32 && hparams.n_expert == 0 && ggml_cpu_has_blas() && !ggml_cpu_has_gpublas()) {
-            n_threads = std::min(4, n_threads);
+        if (curNumTokens >= 32 && hparams.n_expert == 0 && ggml_cpu_has_blas() && !ggml_cpu_has_gpublas()) {
+            numThreads = std::min(4, numThreads);
         }
 
-        ggml_backend_sched_alloc_graph(lctx.sched, gf);
+        ggml_backend_sched_alloc_graph(session.sched, gf);
 
-        llama_set_inputs(lctx, u_batch);
-        _setInputs(curBatch);
+        _setInputs(session, curBatch);
 
         _computeGraph(gf, numThreads);
 
         // update the kv ring buffer
         {
-            kv_self.head += n_tokens;
+            kv_self.head += curNumTokens;
 
             // Ensure kv cache head points to a valid index.
             if (kv_self.head >= kv_self.size) {
@@ -241,38 +247,38 @@ int32_t Inference::decode(Batch& batch)
 
         // extract logits
         if (res) {
-            ggml_backend_t backend_res = ggml_backend_sched_get_tensor_backend(lctx.sched, res);
-            assert(backend_res != nullptr);
-            assert(lctx.logits != nullptr);
+            ggml_backend_t backendRes = ggml_backend_sched_get_tensor_backend(session.sched, res);
+            assert(backendRes != nullptr);
+            assert(!session.logits.empty());
 
-            float* outLogits = session.numLogits + n_outputs_prev * hparams.n_vocab;
+            float* outLogits = session.logits.data() + numPrevOutputs * hparams.n_vocab;
             const int32_t numOutputsNew = session.numOutputs;
 
             if (numOutputsNew) {
                 assert(session.numPrevOutputs + numNewOutputs <= n_outputs);
-                assert((session.numPrevOutputs + numNewOutputs) * n_vocab <= (int64_t)session.logitsSize);
-                ggml_backend_tensor_get_async(backend_res, res, outLogits, 
-                        0, numNewOutputs * n_vocab * sizeof(float));
+                assert((session.numPrevOutputs + numNewOutputs) * hparams.n_vocab <= (int64_t)session.logitsSize);
+                ggml_backend_tensor_get_async(backendRes, res, outLogits, 
+                        0, numNewOutputs * hparams.n_vocab * sizeof(float));
             }
         }
 
         // extract embeddings
         if (embd) {
-            ggml_backend_t backendEmbed = ggml_backend_sched_get_tensor_backend(lctx.sched, embed);
-            GGML_ASSERT(backend_embd != nullptr);
+            ggml_backend_t backendEmbd = ggml_backend_sched_get_tensor_backend(session.sched, embd);
+            assert(backendEmbd != nullptr);
 
             switch (cparams.pooling_type) {
                 case LLAMA_POOLING_TYPE_NONE:
                     {
                         // extract token embeddings
-                        GGML_ASSERT(lctx.embd != nullptr);
-                        float * embd_out = lctx.embd + n_outputs_prev*n_embd;
-                        const int32_t numNewOutputs = lctx.n_outputs;
+                        assert(session.embd != nullptr);
+                        float * embdOut = session.embd.data() + numPrevOutputs * hparams.n_embd;
+                        const int32_t numNewOutputs = session.numOutputs;
 
                         if (numNewOutputs) {
-                            assert( n_outputs_prev + n_outputs_new <= n_outputs);
-                            assert((n_outputs_prev + n_outputs_new)*n_embd <= (int64_t) lctx.embd_size);
-                            ggml_backend_tensor_get_async(backend_embd, embd, embd_out, 0, n_outputs_new*n_embd*sizeof(float));
+                            assert( session.numPrevOutputs + numNewOutputs <= n_outputs);
+                            assert((session.numPrevOutputs + numNewOutputs) * hparams.n_embd <= (int64_t) lctx.embd_size);
+                            ggml_backend_tensor_get_async(backendEmbd, embd, embdOut, 0, numNewOutputs * hparams.n_embd * sizeof(float));
                         }
                     } break;
                 case LLAMA_POOLING_TYPE_CLS:
@@ -281,37 +287,30 @@ int32_t Inference::decode(Batch& batch)
                         GGML_ASSERT(strcmp(embd->name, "result_embd_pooled") == 0);
 
                         // extract sequence embeddings
-                        auto & embd_seq_out = lctx.embd_seq;
-                        embd_seq_out.clear();
+                        auto & embdSeqOut = session.embdSeq;
+                        embdSeqOut.clear();
 
-                        for (uint32_t i = 0; i < n_tokens; i++) {
-                            const llama_seq_id seq_id = u_batch.seq_id[i][0];
-                            if (embd_seq_out.find(seq_id) != embd_seq_out.end()) {
+                        for (uint32_t i = 0; i < curNumTokens; i++) {
+                            const SeqId seqId = curBatch.seqIds[i][0];
+                            if (embdSeqOut.find(seqId) != embdSeqOut.end()) {
                                 continue;
                             }
-                            embd_seq_out[seq_id].resize(n_embd);
-                            ggml_backend_tensor_get_async(backend_embd, embd, embd_seq_out[seq_id].data(), (n_embd*seq_id)*sizeof(float), n_embd*sizeof(float));
+                            embdSeqOut[seqId].resize(hparams.n_embd);
+                            ggml_backend_tensor_get_async(backendEmbd, embd, embdSeqOut[seqId].data(), (hparams.n_embd * seqId) * sizeof(float), 
+                                    hparams.n_embd * sizeof(float));
                         }
                     } break;
                 case LLAMA_POOLING_TYPE_UNSPECIFIED:
                     {
-                        GGML_ASSERT(false && "unknown pooling type");
+                        assert(!"unknown pooling type");
                     } break;
             }
         }
-        n_outputs_prev += lctx.n_outputs;
+        numPrevOutputs += session.numOutputs;
     }
-}
-
-
-
-
-
-
-
-
+    
     // set to total number of outputs in the batch, for use in llama_get_logits_ith
-    lctx.n_outputs = n_outputs;
+    session.numOutputs = numOutputs;
 
     // wait for the computation to finish (automatically done when obtaining the model output)
     //llama_synchronize(&lctx);
@@ -329,5 +328,6 @@ int32_t Inference::decode(Batch& batch)
     }
 
     return 0;
+}
 
 M_END_NAMESPACE

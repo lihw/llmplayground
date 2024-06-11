@@ -18,9 +18,9 @@
 #include <vector>
 #include <stdexcept>
 
-
 M_BEGIN_NAMESPACE
 
+class Model;
 
 class ModelLoader {
 
@@ -53,6 +53,10 @@ public:
 
     virtual bool load(const std::string& file) noexcept = 0;
 
+    size_t getTensorCount() const noexcept
+    {
+        return mNumTensors;
+    }
     const char* getTensorName(int i) const noexcept;
     Weight* getWeight(const char * name) noexcept;
     ggml_tensor* getTensorMeta(const char* name) noexcept; 
@@ -84,6 +88,38 @@ public:
         return getKey(getKvString(kid, mArchName), result, required);
     }
 
+
+    template<typename T>
+    typename std::enable_if<std::is_integral<T>::value, bool>::type
+    getArrayLength(const std::string & key, T & result, const bool required = true) {
+        const int kid = gguf_find_key(meta, key.c_str());
+
+        if (kid < 0) {
+            if (required) {
+                throw std::runtime_error(format("key not found in model: %s", key.c_str()));
+            }
+            return false;
+        }
+
+        struct GGUFMeta::ArrayInfo arr_info =
+            GGUFMeta::GKV<GGUFMeta::ArrayInfo>::get_kv(meta, kid);
+
+
+        result = arr_info.length;
+        return true;
+    }
+
+    template<typename T>
+    typename std::enable_if<std::is_integral<T>::value, bool>::type
+    getArrayLength(const Kv kid, T & result, const bool required = true) {
+        return getArrayLength(llm_kv(kid), result, required);
+    }
+
+    /**
+     * Create a model object after a successful loading 
+    */
+    virtual Model* build() noexcept = 0;
+
 protected:
     size_t mNumKeyValues;
     size_t mNumTensors;
@@ -103,22 +139,6 @@ protected:
     //LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
 };
 
-// FIXME: move model related data from ModelLoader to Model
-class Model {
-public:
-    ModelLoader* ml = nullptr;
-    
-    Model(ModelLoader* ml = nullptr) {
-        this->ml = ml;
-    }
-
-    ~Model();
-
-    bool isValid() const 
-    {
-        return ml != nullptr;
-    }
-};
 
 extern Model loadModel(const char* file) noexcept;
 

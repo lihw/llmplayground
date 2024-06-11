@@ -23,34 +23,6 @@ ModelLoader::~ModelLoader()
     }
 }
 
-#if 0
-template<typename T>
-typename std::enable_if<std::is_integral<T>::value, bool>::type
-get_arr_n(const std::string & key, T & result, const bool required = true) {
-    const int kid = gguf_find_key(meta, key.c_str());
-
-    if (kid < 0) {
-        if (required) {
-            throw std::runtime_error(format("key not found in model: %s", key.c_str()));
-        }
-        return false;
-    }
-
-    struct GGUFMeta::ArrayInfo arr_info =
-        GGUFMeta::GKV<GGUFMeta::ArrayInfo>::get_kv(meta, kid);
-
-
-    result = arr_info.length;
-    return true;
-}
-
-template<typename T>
-typename std::enable_if<std::is_integral<T>::value, bool>::type
-get_arr_n(const enum llm_kv kid, T & result, const bool required = true) {
-    return get_arr_n(llm_kv(kid), result, required);
-}
-#endif
-
 //std::string get_arch_name() const {
 //    return arch_name;
 //}

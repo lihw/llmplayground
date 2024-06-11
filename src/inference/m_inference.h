@@ -7,14 +7,17 @@
 #ifndef M_INFERENCE_H
 #define M_INFERENCE_H
 
-#include <common/m_defs.h>
 #include "m_batch.h"
 
 M_BEGIN_NAMESPACE
 
+struct Session {
+
+};
+
 class Inference {
-    M_REMOVE_COPY_CONSTRUCTOR(Inference);
-    M_REMOVE_MOVE_CONSTRUCTOR(Inference);
+    M_NO_COPY_CONSTRUCTOR(Inference);
+    M_NO_MOVE_CONSTRUCTOR(Inference);
 
 public:
     struct CParams {
@@ -48,7 +51,7 @@ public:
     };
 
 public:
-    void decode(Batch& batch);
+    int32_t decode(Session& session, Batch& batch);
 
 private:
     int32_t mNumQueuedTokens = 0;
