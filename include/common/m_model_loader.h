@@ -58,9 +58,9 @@ public:
         return mNumTensors;
     }
     const char* getTensorName(int i) const noexcept;
-    Weight* getWeight(const char * name) noexcept;
-    ggml_tensor* getTensorMeta(const char* name) noexcept; 
-    ggml_tensor* getTensorMeta(int i) noexcept;
+    const Weight* getWeight(const char * name) const noexcept;
+    ggml_tensor* getTensorMeta(const char* name) const noexcept; 
+    ggml_tensor* getTensorMeta(int i) const noexcept;
     gguf_context* getContext() const noexcept 
     {
         return mMeta;
@@ -120,7 +120,37 @@ public:
     */
     virtual Model* build() noexcept = 0;
 
-protected:
+    /**
+     * 
+    */
+    ggml_tensor* createTensorFor(ggml_context *ctx, const ggml_tensor *cur);
+    /**
+     * 
+    */
+    const ggml_tensor* checkTensorDims(const std::string &name, const std::vector<int64_t> &ne, bool required) const;
+    /**
+     * 
+    */
+    ggml_tensor *createTensor(ggml_context *ctx,
+        const std::string &name,
+        const std::vector<int64_t> &ne,
+        bool required = true);
+    /**
+     * 
+    */
+    ggml_tensor *createTensorAsView(struct ggml_context *ctx,
+        ggml_tensor *base,
+        const std::string &name,
+        const std::vector<int64_t> &ne,
+        size_t offset,
+        bool required = true);
+
+    /**
+     * If all tensors in this model have been created
+    */
+   bool areAllTensorsCreated() const noexcept;
+
+  protected:
     size_t mNumKeyValues;
     size_t mNumTensors;
     size_t mNumElements;
@@ -137,6 +167,8 @@ protected:
     
     std::string mArchName; //! The model arch
     //LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
+
+    uint32_t mNumCreated = 0; //! The number of created tensors
 };
 
 

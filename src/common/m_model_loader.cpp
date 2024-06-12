@@ -9,6 +9,7 @@
 #include <common/m_model_loader_gguf.h>
 
 #include <spdlog/spdlog.h>
+#include <fmt/core.h>
 
 M_BEGIN_NAMESPACE
 
@@ -23,31 +24,25 @@ ModelLoader::~ModelLoader()
     }
 }
 
-//std::string get_arch_name() const {
-//    return arch_name;
-//}
-//
-//enum llm_arch get_arch() const {
-//    return llm_kv.arch;
-//}
-
 const char* ModelLoader::getTensorName(int i) const noexcept 
 {
     return mWeights.at(size_t(i)).tensor->name;
 }
 
-ModelLoader::Weight* ModelLoader::getWeight(const char * name) noexcept 
+const ModelLoader::Weight* ModelLoader::getWeight(const char * name) const noexcept 
 {
+    const auto LOG_HEAD = "ModelLoader::getWeight()";
+
     for (auto& weight : mWeights) {
         if (strcmp(name, weight.tensor->name) == 0) {
             return &weight;
         }
     }
-    spdlog::error("%s: tensor '%s' not found", __func__, name);
+    spdlog::error("{}: tensor '{}' not found", LOG_HEAD, name);
     return nullptr;
 }
 
-ggml_tensor* ModelLoader::getTensorMeta(const char* name) noexcept 
+ggml_tensor* ModelLoader::getTensorMeta(const char* name) const noexcept 
 {
     const auto * weight = getWeight(name);
     if (!weight) {
@@ -57,29 +52,31 @@ ggml_tensor* ModelLoader::getTensorMeta(const char* name) noexcept
     return weight->tensor;
 }
 
-ggml_tensor* ModelLoader::getTensorMeta(int i) noexcept
+ggml_tensor* ModelLoader::getTensorMeta(int i) const noexcept
 {
     return getTensorMeta(getTensorName(i));
 }
 
-#if 0
-struct ggml_tensor* ModelLoader::create_tensor_for(struct ggml_context * ctx, const struct ggml_tensor * cur) {
+struct ggml_tensor* ModelLoader::createTensorFor(ggml_context * ctx, const ggml_tensor * cur) 
+{
     struct ggml_tensor* tensor = ggml_dup_tensor(ctx, cur);
     ggml_set_name(tensor, ggml_get_name(cur));
 
-    n_created++;
+    mNumCreated++;
 
     return tensor;
 }
 
-const struct ggml_tensor * check_tensor_dims(const std::string & name, const std::vector<int64_t> & ne, bool required) const {
-    const struct ggml_tensor * cur = get_tensor_meta(name.c_str());
+const ggml_tensor* ModelLoader::checkTensorDims(const std::string & name, const std::vector<int64_t> & ne, bool required) const {
+    const auto LOG_HEAD = "ModelLoader::checkTensorDims";
+
+    const struct ggml_tensor * cur = getTensorMeta(name.c_str());
 
     if (cur == NULL) {
         if (!required) {
             return NULL;
         }
-        throw std::runtime_error(format("%s: tensor '%s' not found", __func__, name.c_str()));
+        throw std::runtime_error(fmt::format("{}: tensor '{}' not found", LOG_HEAD, name));
     }
 
     {
@@ -90,37 +87,51 @@ const struct ggml_tensor * check_tensor_dims(const std::string & name, const std
                 break;
             }
         }
-        if (!is_ok) {
+
+        auto formatTensorShape = [](const std::vector<int64_t> &ne) -> std::string {
+                char buf[256];
+                snprintf(buf, sizeof(buf), "%5" PRId64, ne.at(0));
+                for (size_t i = 1; i < ne.size(); i++) {
+                    snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), ", %5" PRId64, ne.at(i));
+                }
+                return buf;
+            };
+
+        if (!is_ok)
+        {
             throw std::runtime_error(
-                    format("%s: tensor '%s' has wrong shape; expected %s, got %s",
-                        __func__, name.c_str(),
-                        ggufGetTensorShape(ne).c_str(),
-                        ggufGetTensorShape(cur).c_str()));
+                    fmt::format("{}: tensor '{}' has wrong shape; expected {}, got {}",
+                        LOG_HEAD, name,
+                        formatTensorShape(ne),
+                        formatTensorShape(cur)));
         }
     }
 
     return cur;
 }
 
-struct ggml_tensor * create_tensor(struct ggml_context * ctx, const std::string & name, const std::vector<int64_t> & ne, bool required = true) {
-    const struct ggml_tensor * cur = check_tensor_dims(name, ne, required);
+ggml_tensor * ModelLoader::createTensor(struct ggml_context * ctx, const std::string & name, const std::vector<int64_t> & ne, bool required = true) {
+    const struct ggml_tensor * cur = checkTensorDims(name, ne, required);
 
     if (cur == NULL) {
         return NULL;
     }
 
-    return create_tensor_for(ctx, cur);
+    return createTensorFor(ctx, cur);
 }
 
-struct ggml_tensor * create_tensor_as_view(struct ggml_context * ctx, struct ggml_tensor * base, const std::string & name, const std::vector<int64_t> & ne, size_t offset, bool required = true) {
-    const struct ggml_tensor * cur = check_tensor_dims(name, ne, required);
+ggml_tensor * ModelLoader::createTensorAsView(ggml_context * ctx, ggml_tensor * base, const std::string & name, const std::vector<int64_t> & ne, size_t offset, bool required = true) {
+    const auto LOG_HEAD = "ModelLoader::createTensorAsView()";
+
+    const struct ggml_tensor * cur = checkTensorDims(name, ne, required);
 
     if (cur == NULL) {
         return NULL;
     }
 
     if (cur->type != base->type) {
-        throw std::runtime_error(format("%s: tensor '%s' has wrong type; expected %s, got %s", __func__, name.c_str(), ggml_type_name(base->type), ggml_type_name(cur->type)));
+        throw std::runtime_error(fmt::format("{}: tensor '{}' has wrong type; expected {}, got {}", __func__, name.c_str(), ggml_type_name(base->type), ggml_type_name(cur->type)));
+        return nullptr;
     }
 
     std::array<int64_t, GGML_MAX_DIMS> dims;
@@ -135,17 +146,23 @@ struct ggml_tensor * create_tensor_as_view(struct ggml_context * ctx, struct ggm
 
     ggml_set_name(tensor, name.c_str());
 
-    n_created++;
+    mNumCreated++;
 
     return tensor;
 }
 
-void done_getting_tensors() const {
-    if (n_created != n_tensors) {
-        throw std::runtime_error(format("%s: wrong number of tensors; expected %d, got %d", __func__, n_tensors, n_created));
+bool ModelLoader::areAllTensorsCreated() const noexcept {
+    const auto LOG_HEAD = "ModelLoader::areAllTensorsCreated()";
+
+    if (mNumCreated != mNumTensors) {
+        throw std::runtime_error(fmt::format("{}: wrong number of tensors; expected {}, got {}", 
+                LOG_HEAD, mNumTensors, mNumCreated));
+        return false;
     }
+    return true;
 }
 
+#if 0
 void init_mappings(bool prefetch = true, llama_mlocks * mlock_mmaps = nullptr) {
     if (use_mmap) {
         mappings.reserve(files.size());
