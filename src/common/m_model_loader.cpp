@@ -11,6 +11,8 @@
 #include <spdlog/spdlog.h>
 #include <fmt/core.h>
 
+#include <array>
+
 M_BEGIN_NAMESPACE
 
 ModelLoader::ModelLoader() 
@@ -57,7 +59,7 @@ ggml_tensor* ModelLoader::getTensorMeta(int i) const noexcept
     return getTensorMeta(getTensorName(i));
 }
 
-struct ggml_tensor* ModelLoader::createTensorFor(ggml_context * ctx, const ggml_tensor * cur) 
+ggml_tensor* ModelLoader::createTensorFor(ggml_context * ctx, const ggml_tensor * cur) 
 {
     struct ggml_tensor* tensor = ggml_dup_tensor(ctx, cur);
     ggml_set_name(tensor, ggml_get_name(cur));
@@ -72,23 +74,24 @@ const ggml_tensor* ModelLoader::checkTensorDims(const std::string & name, const 
 
     const struct ggml_tensor * cur = getTensorMeta(name.c_str());
 
-    if (cur == NULL) {
-        if (!required) {
-            return NULL;
+    if (cur == nullptr) {
+        if (required) {
+            throw std::runtime_error(fmt::format("{}: tensor '{}' not found", LOG_HEAD, name));
         }
-        throw std::runtime_error(fmt::format("{}: tensor '{}' not found", LOG_HEAD, name));
+        
+        return nullptr;
     }
 
     {
-        bool is_ok = true;
+        bool ok = true;
         for (size_t i = 0; i < GGML_MAX_DIMS; ++i) {
             if ((i < ne.size() && ne[i] != cur->ne[i]) || (i >= ne.size() && cur->ne[i] != 1)) {
-                is_ok = false;
+                ok = false;
                 break;
             }
         }
 
-        auto formatTensorShape = [](const std::vector<int64_t> &ne) -> std::string {
+        auto formatTensorShape1 = [](const std::vector<int64_t> &ne) -> std::string {
                 char buf[256];
                 snprintf(buf, sizeof(buf), "%5" PRId64, ne.at(0));
                 for (size_t i = 1; i < ne.size(); i++) {
@@ -96,21 +99,29 @@ const ggml_tensor* ModelLoader::checkTensorDims(const std::string & name, const 
                 }
                 return buf;
             };
+        auto formatTensorShape2 = [](const struct ggml_tensor* t) -> std::string {
+                char buf[256];
+                snprintf(buf, sizeof(buf), "%5" PRId64, t->ne[0]);
+                for (int i = 1; i < GGML_MAX_DIMS; i++) {
+                    snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), ", %5" PRId64, t->ne[i]);
+                }
+                return buf;
+            };
 
-        if (!is_ok)
+        if (!ok)
         {
             throw std::runtime_error(
                     fmt::format("{}: tensor '{}' has wrong shape; expected {}, got {}",
                         LOG_HEAD, name,
-                        formatTensorShape(ne),
-                        formatTensorShape(cur)));
+                        formatTensorShape1(ne),
+                        formatTensorShape2(cur)));
         }
     }
 
     return cur;
 }
 
-ggml_tensor * ModelLoader::createTensor(struct ggml_context * ctx, const std::string & name, const std::vector<int64_t> & ne, bool required = true) {
+ggml_tensor * ModelLoader::createTensor(struct ggml_context * ctx, const std::string & name, const std::vector<int64_t> & ne, bool required) {
     const struct ggml_tensor * cur = checkTensorDims(name, ne, required);
 
     if (cur == NULL) {
@@ -120,7 +131,7 @@ ggml_tensor * ModelLoader::createTensor(struct ggml_context * ctx, const std::st
     return createTensorFor(ctx, cur);
 }
 
-ggml_tensor * ModelLoader::createTensorAsView(ggml_context * ctx, ggml_tensor * base, const std::string & name, const std::vector<int64_t> & ne, size_t offset, bool required = true) {
+ggml_tensor * ModelLoader::createTensorAsView(ggml_context * ctx, ggml_tensor * base, const std::string & name, const std::vector<int64_t> & ne, size_t offset, bool required) {
     const auto LOG_HEAD = "ModelLoader::createTensorAsView()";
 
     const struct ggml_tensor * cur = checkTensorDims(name, ne, required);
@@ -151,7 +162,7 @@ ggml_tensor * ModelLoader::createTensorAsView(ggml_context * ctx, ggml_tensor * 
     return tensor;
 }
 
-bool ModelLoader::areAllTensorsCreated() const noexcept {
+bool ModelLoader::areAllTensorsCreated() const  {
     const auto LOG_HEAD = "ModelLoader::areAllTensorsCreated()";
 
     if (mNumCreated != mNumTensors) {
@@ -320,6 +331,8 @@ bool load_all_data(
 
 #endif
 
+#if 0
+
 Model::~Model()
 {
     delete ml;
@@ -327,7 +340,6 @@ Model::~Model()
 
 Model loadModel(const char* file) noexcept 
 {
-#if 0
     unsigned curPercentage = 0;
     auto progress_callback_user_data = &curPercentage;
     auto progress_callback = [](float progress, void * ctx) {
@@ -342,7 +354,6 @@ Model loadModel(const char* file) noexcept
         }
         return true;
     };
-#endif
 
     const char* suffix = strrchr(file, '.');
     if (strncmp(suffix, ".gguf", 5) == 0) {
@@ -359,5 +370,7 @@ Model loadModel(const char* file) noexcept
     spdlog::error("{}: unsupported model format {}", __func__, file);
     return Model();
 }
+
+#endif
 
 M_END_NAMESPACE

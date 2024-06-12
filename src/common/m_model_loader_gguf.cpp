@@ -141,19 +141,18 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
     constexpr auto LOG_HEAD = "ModelLoaderGguf:load()";
 
     ggml_context* ctx = NULL;
-    gguf_init_params params = {
+    gguf_init_params p = {
         /*.no_alloc = */ true,
         /*.ctx      = */ &ctx,
     };
 
-    mMeta = gguf_init_from_file(file.c_str(), params);
+    mMeta = gguf_init_from_file(file.c_str(), p);
     if (!mMeta) {
         spdlog::error("{}: failed to load model from {}\n", LOG_HEAD, file.c_str());
         return false;
     }
 
     getKey(Kv::GENERAL_ARCHITECTURE, mArchName, false);
-    //llm_kv = LLM_KV(getArchFromName(mArchNam));
 
     // Save tensors data offset of the main file.
     // For subsidiary files, `meta` tensor data offset must not be used,
@@ -161,12 +160,13 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
     for (ggml_tensor* cur = ggml_get_first_tensor(ctx); cur; cur = ggml_get_next_tensor(ctx, cur)) {
         mWeights.emplace_back(uint16_t(0), cur->name, mMeta, cur);
     }
-    //files.emplace_back(new llama_file(file.c_str(), "rb"));
-    //contexts.emplace_back(ctx);
+    
+    mFiles.emplace_back(file);
+    mContexts.emplace_back(ctx);
         
     uint16_t numSplits = 0;
     getKey(Kv::SPLIT_COUNT, numSplits, false);
-        
+
     // Load additional GGML contexts
     if (numSplits > 1) {
         uint16_t idx = 0;
@@ -178,7 +178,7 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
 
         char splitPrefix[PATH_MAX] = {0};
         if (!ggufSplitPrefix(splitPrefix, sizeof(splitPrefix), file.c_str(), idx, numSplits)) {
-            spdlog::error("{}: invalid split file: {}", LOG_HEAD, file.c_str());
+            spdlog::error("{}: invalid split file: {}", LOG_HEAD, file);
             return false;
         }
 
@@ -202,7 +202,7 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
             for (ggml_tensor * cur = ggml_get_first_tensor(ctx); cur; cur = ggml_get_next_tensor(ctx, cur)) {
                 mWeights.emplace_back(idx, cur->name, ctxGguf, cur);
             }
-            //files.emplace_back(new llama_file(split_path, "rb"));
+            mFiles.emplace_back(splitPath);
             mContexts.emplace_back(ctx);
 
             gguf_free(ctxGguf);
@@ -233,7 +233,7 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
     }
 
     spdlog::info("{}: loaded meta data with {} key-value pairs and {} tensors from {} (version {})\n",
-            LOG_HEAD, mNumKeyValues, mNumTensors, file.c_str(), ggufGetVerName(mVersion));
+            LOG_HEAD, mNumKeyValues, mNumTensors, file, ggufGetVerName(mVersion));
         
     // determine file type based on the number of tensors for each quantization and print meta data
     // TODO: make optional
@@ -311,19 +311,22 @@ ModelLoaderGguf::~ModelLoaderGguf()
 
 Model* ModelLoaderGguf::build() noexcept
 {
-    Model* model = new Model();
+    const auto LOG_HEAD = "ModelLoaderGguf::build()";
+
+    Model* model = new Model;
 
     //
     // load parameters
     //
-
-    auto& params = model->params;
-
+    if (!model->loadParameters(*this)) {
+        spdlog::error("{}: error loading model parameters", LOG_HEAD);
+        return nullptr;
+    }
 
     //
     // load model vocab
     // 
-    model->vocab.load(*this);
+    model->loadVocab(*this);
     if (params.vocabOnly) {
         spdlog::info("{}: vocab only - skipping tensors", LOG_HEAD);
         return model;
@@ -332,7 +335,13 @@ Model* ModelLoaderGguf::build() noexcept
     //
     // load tensors
     //
-    if (!llm_load_tensors(
+    if (!model->loadTensors(*this, params.mainGpu, params.numGpuLayers, params.useMemoryLock)) {
+        spdlog::error("{}: error loading model parameters", LOG_HEAD);
+        return nullptr;
+    }
+
+    /*
+    (
             ml, model, params.n_gpu_layers, params.split_mode,  params.main_gpu, params.tensor_split, params.use_mlock,
             params.progress_callback, params.progress_callback_user_data
         )) {
@@ -342,6 +351,7 @@ Model* ModelLoaderGguf::build() noexcept
         spdlog::error("{}: error loading model: {}\n", LOG_HEAD, err.what());
         return nullptr;
     }
+    */
 
     return model;
 }

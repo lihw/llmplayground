@@ -9,6 +9,11 @@
 
 #include "m_defs.h"
 
+#include <vector>
+#include <memory>
+
+#include <cassert>
+
 M_BEGIN_NAMESPACE
 
 extern void replaceAll(std::string& s, const std::string& search, const std::string& replace);
@@ -58,9 +63,9 @@ struct MemoryLock {
     
     static size_t lockGranularity();
 
-    bool rawLock(const void * addr, size_t len) const;
+    bool rawLock(void * addr, size_t len) const;
 
-    static void rawUnlock(const void * addr, size_t len) {}
+    static void rawUnlock(void* addr, size_t len);
 
 #if defined _POSIX_MEMLOCK_RANGE || defined _WIN32
     static constexpr bool SUPPORTED = true;

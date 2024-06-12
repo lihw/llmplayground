@@ -8,6 +8,8 @@
 
 #include <spdlog/spdlog.h>
 
+#include <windows.h>
+
 M_BEGIN_NAMESPACE
 
 void replaceAll(std::string& s, const std::string& search, const std::string& replace) 
@@ -93,6 +95,18 @@ void MemoryLock::rawUnlock(void *addr, size_t size)
 
 #elif defined(_WIN32)
 
+static std::string getWinErrString(DWORD err) {
+    LPSTR buf;
+    size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPSTR)&buf, 0, NULL);
+    if (!size) {
+        return "FormatMessageA failed";
+    }
+    std::string ret(buf, size);
+    LocalFree(buf);
+    return ret;
+}
+
 size_t MemoryLock::lockGranularity() 
 {
     SYSTEM_INFO si;
@@ -107,10 +121,10 @@ bool MemoryLock::rawLock(void * ptr, size_t len) const
             return true;
         }
         if (tries == 2) {
-            LLAMA_LOG_WARN("warning: failed to VirtualLock %zu-byte buffer (after previously locking %zu bytes): %s\n",
+            spdlog::warn("warning: failed to VirtualLock %zu-byte buffer (after previously locking {} bytes): {}\n",
                 len,
                 size,
-                llama_format_win_err(GetLastError()).c_str());
+                getWinErrString(GetLastError()));
             return false;
         }
 
@@ -118,8 +132,8 @@ bool MemoryLock::rawLock(void * ptr, size_t len) const
         // set size and try again.
         SIZE_T min_ws_size, max_ws_size;
         if (!GetProcessWorkingSetSize(GetCurrentProcess(), &min_ws_size, &max_ws_size)) {
-            LLAMA_LOG_WARN(
-                "warning: GetProcessWorkingSetSize failed: %s\n", llama_format_win_err(GetLastError()).c_str());
+            spdlog::warn(
+                "GetProcessWorkingSetSize failed: {}", getWinErrString(GetLastError()));
             return false;
         }
         // Per MSDN: "The maximum number of pages that a process can lock
@@ -131,8 +145,8 @@ bool MemoryLock::rawLock(void * ptr, size_t len) const
         min_ws_size += increment;
         max_ws_size += increment;
         if (!SetProcessWorkingSetSize(GetCurrentProcess(), min_ws_size, max_ws_size)) {
-            LLAMA_LOG_WARN(
-                "warning: SetProcessWorkingSetSize failed: %s\n", llama_format_win_err(GetLastError()).c_str());
+            spdlog::warn(
+                "SetProcessWorkingSetSize failed: {}", getWinErrString(GetLastError()));
             return false;
         }
     }
@@ -141,7 +155,7 @@ bool MemoryLock::rawLock(void * ptr, size_t len) const
 void MemoryLock::rawUnlock(void *ptr, size_t len)
 {
     if (!VirtualUnlock(ptr, len)) {
-        LLAMA_LOG_WARN("warning: failed to VirtualUnlock buffer: %s\n", llama_format_win_err(GetLastError()).c_str());
+        spdlog::warn("failed to VirtualUnlock buffer: {}", getWinErrString(GetLastError()));
     }
 }
 
@@ -157,6 +171,7 @@ bool MemoryLock::rawLock(const void *addr, size_t len) const
 
 void MemoryLock::rawUnlock(const void * addr, size_t len) 
 {
+    assert(addr == nullptr && len == 0);
 }
 #endif
 

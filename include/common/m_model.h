@@ -57,12 +57,6 @@ public:
         MODEL_16x12B,
     };
 
-    Type type = Type::MODEL_UNKNOWN;
-    Arch arch = Arch::UNKNOWN;
-    GgufType ftype = GgufType::ALL_F32;
-
-    std::string name = "n/a";
-
     struct Parameters
     {
         bool vocabOnly;
@@ -108,6 +102,18 @@ public:
         // enum llama_rope_type rope_type = LLAMA_ROPE_TYPE_NONE;
         // enum llama_rope_scaling_type rope_scaling_type_train = LLAMA_ROPE_SCALING_TYPE_NONE;
     } params = {};
+
+public:
+    explicit Model();
+
+private:
+    Type type = Type::MODEL_UNKNOWN;
+    Arch arch = Arch::UNKNOWN;
+    GgufType ftype = GgufType::ALL_F32;
+
+    std::string name = "n/a";
+
+    
 
     Vocab vocab;
 
@@ -258,27 +264,9 @@ public:
     bool loadParameters(ModelLoader &ml) noexcept;
 
     bool loadTensors(ModelLoader &ml, int mainGpu, int32_t numGpuLayers, bool useMemoryLock) noexcept;
-};
 
-// FIXME: move model related data from ModelLoader to Model
-//class Model {
-//public:
-//    ModelLoader* ml = nullptr;
-//    
-//    Model(ModelLoader* ml = nullptr) {
-//        this->ml = ml;
-//    }
-//
-//    ~Model();
-//
-//    bool isValid() const 
-//    {
-//        return ml != nullptr;
-//    }
-//
-//    struct Parameters
-//    
-//};
+    bool loadVocab(ModelLoader& ml) noexcept;
+};
 
 M_END_NAMESPACE
 

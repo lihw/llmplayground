@@ -8,8 +8,8 @@
 #include <common/m_model_loader.h>
 #include <common/m_model_loader_gguf.h>
 
-#include <ggml/ggml.h>>
-#include <ggml/ggml-backend.h>>
+#include <ggml/ggml.h>
+#include <ggml/ggml-backend.h>
 #include <spdlog/spdlog.h>
 
 #include <cassert>
@@ -20,7 +20,7 @@ static const std::map<Arch, std::map<Tensor, std::string>> TENSOR_NAMES = {
     {
         Arch::LLAMA,
         {
-            { Tensor::TOKEembedingLength,      "tokeembedingLength" },
+            { Tensor::TOKEN_EMBD,      "tokeembedingLength" },
             { Tensor::OUTPUT_NORM,     "output_norm" },
             { Tensor::OUTPUT,          "output" },
             { Tensor::ROPE_FREQS,      "rope_freqs" },
@@ -98,8 +98,8 @@ bool Model::loadParameters(ModelLoader& ml) noexcept
 
     // get metadata as string
     for (int i = 0; i < gguf_get_n_kv(ctx); i++) {
-        enum gguf_type type = gguf_get_kv_type(ctx, i);
-        if (type == GGUF_TYPE_ARRAY) {
+        gguf_type t = gguf_get_kv_type(ctx, i);
+        if (t == GGUF_TYPE_ARRAY) {
             continue;
         }
         const char * name = gguf_get_key(ctx, i);
@@ -400,12 +400,12 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
 
     std::map<ggml_backend_buffer_type_t, ggml_context *> type2contexts;
     for (auto & it : layerBufferTypeCount) {
-        struct ggml_init_params params = {
+        struct ggml_init_params p = {
             /*.mem_size   =*/ ctx_size,
             /*.mem_buffer =*/ NULL,
             /*.no_alloc   =*/ true,
         };
-        ggml_context * ctx = ggml_init(params);
+        ggml_context * ctx = ggml_init(p);
         if (!ctx) {
             throw std::runtime_error("failed to create context");
             return false;
@@ -555,10 +555,10 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
         }
     }
 
-    ml.done_getting_tensors();
+    ml.areAllTensorsCreated();
 
-    ml.init_mappings(true, useMemoryLock? &model.mlock_mmaps : nullptr);
-    model.mappings.reserve(ml.mappings.size());
+    //ml.init_mappings(true, useMemoryLock? &model.mlock_mmaps : nullptr);
+    //model.mappings.reserve(ml.mappings.size());
     
     using BufferMap = std::unordered_map<uint32_t, ggml_backend_buffer_t>;
 
@@ -567,7 +567,7 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
     contextBuffers.reserve(type2contexts.size());
 
     // Ensure we have enough capacity for the maximum backend buffer we will potentially create
-    size_t maxBackendBuffers = type2contexts.size() * ml.files.size();
+    size_t maxBackendBuffers = type2contexts.size() * ml.getFiles().size();
     buffers.reserve(maxBackendBuffers);
 
     for (auto &it : type2contexts) {
@@ -636,7 +636,7 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
             mlock->initialize(ggml_backend_buffer_get_base(buf));
             mlock->growTo(ggml_backend_buffer_get_size(buf));
         }
-        for (uint32_t idx = 0; idx < ml.files.size(); idx++) {
+        for (uint32_t idx = 0; idx < ml.getFiles().size(); idx++) {
             bufs.emplace(idx, buf);
         }
         //}
@@ -657,9 +657,9 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
     }
 
     if (llama_supports_gpu_offload()) {
-        const int n_gpu = std::min(numGpuLayers, int(params.layerCount));
+        const int numGpu = std::min(numGpuLayers, int(params.layerCount));
 
-        spdlog::info("{}: offloading {} repeating layers to GPU", LOG_HEAD, n_gpu);
+        spdlog::info("{}: offloading {} repeating layers to GPU", LOG_HEAD, numGpu);
         if (numGpuLayers > (int)params.layerCount) {
             spdlog::info("{}: offloading non-repeating layers to GPU", LOG_HEAD);
         }
@@ -674,7 +674,7 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
     }
 
     // print memory requirements
-    for (ggml_backend_buffer_t buf : model.bufs) {
+    for (ggml_backend_buffer_t buf : buffers) {
         spdlog::info("{}: {:10s} buffer size = {:8.2f} MiB\n",
             LOG_HEAD,
             ggml_backend_buffer_name(buf),
@@ -684,7 +684,7 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
     // populate tensors_by_name
     for (ggml_context *ctx : contexts) {
         for (auto *cur = ggml_get_first_tensor(ctx); cur != NULL; cur = ggml_get_next_tensor(ctx, cur)) {
-            model.tensors_by_name.emplace_back(ggml_get_name(cur), cur);
+            tensors_by_name.emplace_back(ggml_get_name(cur), cur);
         }
     }
 
@@ -693,7 +693,7 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
         ggml_context *ctx = it.first;
         auto &bufs = it.second;
         if (!ml.load_all_data(
-                ctx, bufs, useMemoryLock? &model.mlock_mmaps : NULL, progress_callback, progress_callback_user_data)) {
+                ctx, bufs, useMemoryLock? &mlock_mmaps : NULL, progress_callback, progress_callback_user_data)) {
             return false;
         }
     }
