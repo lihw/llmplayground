@@ -173,9 +173,8 @@ bool ModelLoader::areAllTensorsCreated() const  {
     return true;
 }
 
-#if 0
-void init_mappings(bool prefetch = true, llama_mlocks * mlock_mmaps = nullptr) {
-    if (use_mmap) {
+void ModelLoader::initializeMappings(bool prefetchtrue, MemoryLocks* memoryLocks) {
+    if (mUseMmpa) {
         mappings.reserve(files.size());
         mmaps_used.reserve(files.size());
         for (const auto & file : files) {
@@ -195,6 +194,8 @@ void init_mappings(bool prefetch = true, llama_mlocks * mlock_mmaps = nullptr) {
         size_data += ggml_nbytes(w.tensor);
     }
 }
+
+#if 0
 
 void get_mapping_range(size_t * first, size_t * last, void ** addr, int idx, ggml_context * ctx) const {
     GGML_ASSERT(!mappings.empty());

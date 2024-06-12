@@ -113,10 +113,73 @@ private:
 
     std::string name = "n/a";
 
-    
-
     Vocab vocab;
 
+
+    // llama_split_mode split_mode;
+    // int main_gpu;
+    // int n_gpu_layers;
+
+    // gguf metadata
+    std::unordered_map<std::string, std::string> ggufKv;
+
+    // layer -> buffer type mapping
+    struct LayerBufferType
+    {
+        LayerBufferType() : bufferTypeMatrix(nullptr), bufferType(nullptr) {}
+        LayerBufferType(ggml_backend_buffer_type_t matrix) : bufferTypeMatrix(matrix), bufferType(matrix) {}
+        LayerBufferType(ggml_backend_buffer_type_t matrix, ggml_backend_buffer_type_t other)
+            : bufferTypeMatrix(matrix), bufferType(other)
+        {}
+
+        ggml_backend_buffer_type_t bufferTypeMatrix;// matrices only - used by split buffers and backends that support
+                                                    // only matrix multiplication
+        ggml_backend_buffer_type_t bufferType;// everything else
+    };
+
+    LayerBufferType layerBufferTypeInput;
+    LayerBufferType layerBufferTypeOutput;
+    std::vector<LayerBufferType> layerBufferTypes;
+
+
+    //  // model memory mapped files
+    //  llama_mmaps mappings;
+
+    //  ~llama_model() {
+    //      for (struct ggml_context * ctx : ctxs) {
+    //          ggml_free(ctx);
+    //      }
+    //      for (ggml_backend_buffer_t buf : bufs) {
+    // #ifdef GGML_USE_CUDA
+    //             if (ggml_backend_buffer_get_type(buf) == ggml_backend_cpu_buffer_type()) {
+    //                 ggml_backend_cuda_unregister_host_buffer(ggml_backend_buffer_get_base(buf));
+    //             }
+    // #endif
+    //             ggml_backend_buffer_free(buf);
+    //         }
+    //     }
+public:
+    bool loadParameters(ModelLoader &ml) noexcept;
+
+    bool loadTensors(ModelLoader &ml, int mainGpu, int32_t numGpuLayers, bool useMemoryLock) noexcept;
+
+    bool loadVocab(ModelLoader& ml) noexcept;
+
+
+private:
+    // contexts where the model tensors metadata is stored
+    std::vector<ggml_context *> mContexts;
+
+    //! the model memory buffers for the tensor data
+    std::vector<ggml_backend_buffer_t> mBuffers;
+
+    // objects representing data potentially being locked in memory
+    MemoryLocks mMemoryLocks;
+    //  llama_mlocks mlock_mmaps;
+
+    // for quantize-stats only
+    std::vector<std::pair<std::string, struct ggml_tensor *>> mTensorsByName;
+    
     struct {
         ggml_tensor *token_embed;//! ???
         //ggml_tensor *typeEmbd;//! ???
@@ -129,8 +192,8 @@ private:
         //ggml_tensor *output;
         //ggml_tensor *output_b;
 
-    } tensors;
-
+    } mTensors;
+    
     struct Layer {
         // normalization
         struct ggml_tensor *attn_norm;
@@ -201,71 +264,11 @@ private:
         struct ggml_tensor *ssm_conv1d_b;
         struct ggml_tensor *ssm_dt_b;
     };
-    std::vector<Layer> layers;
+    std::vector<Layer> mLayers;
 
-    // llama_split_mode split_mode;
-    // int main_gpu;
-    // int n_gpu_layers;
+    int64_t mLoadUs = 0;//! when to load the model
+    int64_t mStartUs = 0;//! when to load the tensors
 
-    // gguf metadata
-    std::unordered_map<std::string, std::string> ggufKv;
-
-    // layer -> buffer type mapping
-    struct LayerBufferType
-    {
-        LayerBufferType() : bufferTypeMatrix(nullptr), bufferType(nullptr) {}
-        LayerBufferType(ggml_backend_buffer_type_t matrix) : bufferTypeMatrix(matrix), bufferType(matrix) {}
-        LayerBufferType(ggml_backend_buffer_type_t matrix, ggml_backend_buffer_type_t other)
-            : bufferTypeMatrix(matrix), bufferType(other)
-        {}
-
-        ggml_backend_buffer_type_t bufferTypeMatrix;// matrices only - used by split buffers and backends that support
-                                                    // only matrix multiplication
-        ggml_backend_buffer_type_t bufferType;// everything else
-    };
-
-    LayerBufferType layerBufferTypeInput;
-    LayerBufferType layerBufferTypeOutput;
-    std::vector<LayerBufferType> layerBufferTypes;
-
-    // contexts where the model tensors metadata is stored
-    std::vector<ggml_context *> contexts;
-
-    //! the model memory buffers for the tensor data
-    std::vector<ggml_backend_buffer_t> buffers;
-
-    //  // model memory mapped files
-    //  llama_mmaps mappings;
-
-    // objects representing data potentially being locked in memory
-    MemoryLocks memoryLocks;
-    //  llama_mlocks mlock_mmaps;
-
-    //  // for quantize-stats only
-    //  std::vector<std::pair<std::string, struct ggml_tensor *>> tensors_by_name;
-
-    int64_t loadUs = 0;//! when to load the model
-    int64_t startUs = 0;//! when to load the tensors
-
-    //  ~llama_model() {
-    //      for (struct ggml_context * ctx : ctxs) {
-    //          ggml_free(ctx);
-    //      }
-    //      for (ggml_backend_buffer_t buf : bufs) {
-    // #ifdef GGML_USE_CUDA
-    //             if (ggml_backend_buffer_get_type(buf) == ggml_backend_cpu_buffer_type()) {
-    //                 ggml_backend_cuda_unregister_host_buffer(ggml_backend_buffer_get_base(buf));
-    //             }
-    // #endif
-    //             ggml_backend_buffer_free(buf);
-    //         }
-    //     }
-public:
-    bool loadParameters(ModelLoader &ml) noexcept;
-
-    bool loadTensors(ModelLoader &ml, int mainGpu, int32_t numGpuLayers, bool useMemoryLock) noexcept;
-
-    bool loadVocab(ModelLoader& ml) noexcept;
 };
 
 M_END_NAMESPACE

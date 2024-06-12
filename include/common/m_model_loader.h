@@ -186,6 +186,8 @@ public:
     */
    bool areAllTensorsCreated() const;
 
+    void initializeMappings(bool prefetch = true, MemoryLocks *memoryLocks = nullptr);
+
   protected:
     size_t mNumKeyValues;
     size_t mNumTensors;
