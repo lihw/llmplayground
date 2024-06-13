@@ -161,7 +161,7 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
         mWeights.emplace_back(uint16_t(0), cur->name, mMeta, cur);
     }
     
-    mFiles.emplace_back(file);
+    mFiles.emplace_back(new File(file.c_str(), "rb"));
     mContexts.emplace_back(ctx);
         
     uint16_t numSplits = 0;
@@ -202,7 +202,7 @@ bool ModelLoaderGguf::load(const std::string &file) noexcept
             for (ggml_tensor * cur = ggml_get_first_tensor(ctx); cur; cur = ggml_get_next_tensor(ctx, cur)) {
                 mWeights.emplace_back(idx, cur->name, ctxGguf, cur);
             }
-            mFiles.emplace_back(splitPath);
+            mFiles.emplace_back(new File(splitPath, "rb"));
             mContexts.emplace_back(ctx);
 
             gguf_free(ctxGguf);

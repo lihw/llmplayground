@@ -9,8 +9,10 @@
 
 #include <common/m_defs.h>
 #include <common/m_gguf.h>
+#include <common/m_misc.h>
 
 #include <ggml/ggml.h>
+#include <ggml/ggml-backend.h>
 
 #include <fmt/core.h>
 
@@ -33,7 +35,7 @@ public:
     */
     struct Weight {
         uint16_t  idx; // source file index
-        size_t   offs; // tensor data offset in the original file
+        size_t   offset; // tensor data offset in the original file
 
         ggml_tensor * tensor;
 
@@ -42,7 +44,7 @@ public:
             , tensor(tensor) {
 
             const int tensor_idx = gguf_find_tensor(gguf_ctx, name);
-            offs = gguf_get_data_offset(gguf_ctx) + gguf_get_tensor_offset(gguf_ctx, tensor_idx);
+            offset = gguf_get_data_offset(gguf_ctx) + gguf_get_tensor_offset(gguf_ctx, tensor_idx);
         }
     };
 
@@ -101,7 +103,7 @@ public:
         return mArchName;
     }
 
-    const std::vector<std::string>& getFiles() const noexcept
+    const std::vector<std::unique_ptr<File>>& getFiles() const noexcept
     {
         return mFiles;
     }
@@ -132,16 +134,16 @@ public:
 
         if (kid < 0) {
             if (required) {
-                throw std::runtime_error(fmt::format("key not found in model: {}", key.c_str()));
+                throw std::runtime_error(fmt::format("key not found in model: {}", key));
             }
             return false;
         }
 
-        struct GGUFMeta::ArrayInfo arr_info =
+        struct GGUFMeta::ArrayInfo arrInfo =
             GGUFMeta::GKV<GGUFMeta::ArrayInfo>::get_kv(mMeta, kid);
 
 
-        result = arr_info.length;
+        result = T(arrInfo.length);
         return true;
     }
 
@@ -181,10 +183,15 @@ public:
         size_t offset,
         bool required = true);
 
+    bool loadData(
+        ggml_context* ctx,
+        std::unordered_map<uint32_t, ggml_backend_buffer_t>& bufferMap,
+        MemoryLocks* memoryLocks);
+
     /**
      * If all tensors in this model have been created
     */
-   bool areAllTensorsCreated() const;
+    bool areAllTensorsCreated() const;
 
     void initializeMappings(bool prefetch = true, MemoryLocks *memoryLocks = nullptr);
 
@@ -194,9 +201,10 @@ public:
     size_t mNumElements;
     size_t mNumBytes;
 
-    //bool mUseMmap = false;
-    std::vector<std::string> mFiles;
-    //llama_mmaps mappings;
+    bool mUseMmap = false;
+    std::vector<std::unique_ptr<File>> mFiles;
+    Mmaps mMmaps;
+    std::vector<std::pair<size_t, size_t>> mUsedMmaps;
     //std::unordered_map<std::string, struct llama_model_kv_override> kv_overrides;
     
     std::vector<Weight>           mWeights;
@@ -208,6 +216,7 @@ public:
     uint32_t mNumCreated = 0; //! The number of created tensors
 };
 
+extern bool supportGpuOffload(void);
 
 extern Model loadModel(const char* file) noexcept;
 

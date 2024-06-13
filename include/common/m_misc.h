@@ -23,6 +23,23 @@ extern size_t utf8Len(char src) noexcept;
 extern void escapeWhitespace(std::string & text);
 extern void unescapeWhitespace(std::string & word);
 
+struct File {
+    std::string name; //! The file path
+    FILE * fp; //! use FILE * so we don't have to re-open the file to mmap
+    size_t size;
+    
+    File(const char * fname, const char * mode);
+    ~File();
+    
+    size_t tell() const;
+    void seek(size_t offset, int whence) const;
+    void readRaw(void * ptr, size_t len) const;
+    uint32_t readU32() const;
+    void writeRaw(const void * ptr, size_t len) const;
+    void writeU32(uint32_t val) const;
+};
+using Files = std::vector<std::unique_ptr<File>>;
+
 // Represents some region of memory being locked using mlock or VirtualLock;
 // will automatically unlock on destruction.
 struct MemoryLock {
@@ -75,6 +92,36 @@ struct MemoryLock {
 #endif
 };
 using MemoryLocks = std::vector<std::unique_ptr<MemoryLock>>;
+
+struct Mmap {
+    void* addr;
+    size_t size;
+
+    M_NO_COPY_CONSTRUCTOR(Mmap);
+    M_NO_MOVE_CONSTRUCTOR(Mmap);
+
+    Mmap(File* file, size_t prefetch = (size_t)-1 /* -1 = max value */, bool numa = false);
+
+    ~Mmap();
+
+    // partially unmap the file in the range [first, last)
+    void unmapRange(size_t first, size_t last);
+    
+
+#ifdef _POSIX_MAPPED_FILES
+    static constexpr bool SUPPORTED = true;
+    // list of mapped fragments (first_offset, last_offset)
+    std::vector<std::pair<size_t, size_t>> mapped_fragments;
+
+#elif defined(_WIN32)
+    static constexpr bool SUPPORTED = true;
+
+#else
+    static constexpr bool SUPPORTED = false;
+#endif
+};
+
+using Mmaps = std::vector<std::unique_ptr<Mmap>>;
 
 M_END_NAMESPACE
 

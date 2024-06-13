@@ -159,11 +159,11 @@ private:
     //         }
     //     }
 public:
-    bool loadParameters(ModelLoader &ml) noexcept;
+    bool loadParameters(ModelLoader &ml);
 
-    bool loadTensors(ModelLoader &ml, int mainGpu, int32_t numGpuLayers, bool useMemoryLock) noexcept;
+    bool loadTensors(ModelLoader &ml, int mainGpu, int32_t numGpuLayers, bool useMemoryLock);
 
-    bool loadVocab(ModelLoader& ml) noexcept;
+    bool loadVocab(ModelLoader& ml);
 
 
 private:

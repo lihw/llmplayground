@@ -92,7 +92,7 @@ struct TensorNameTranslator {
     }
 };
 
-bool Model::loadParameters(ModelLoader& ml) noexcept
+bool Model::loadParameters(ModelLoader& ml)
 {
     const gguf_context* ctx = ml.getContext();
 
@@ -102,9 +102,9 @@ bool Model::loadParameters(ModelLoader& ml) noexcept
         if (t == GGUF_TYPE_ARRAY) {
             continue;
         }
-        const char * name = gguf_get_key(ctx, i);
-        const std::string value = ggufKvToStr(ctx, i);
-        ggufKv.emplace(name, value);
+        const char * n = gguf_get_key(ctx, i);
+        const std::string v = ggufKvToStr(ctx, i);
+        ggufKv.emplace(n, v);
     }
 
     // get general kv
@@ -285,7 +285,7 @@ static ggml_backend_buffer_type_t getDefaultBufferTypeOffload(int gpu)
 }
 
 
-bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool useMemoryLock) noexcept 
+bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool useMemoryLock)  
 {
     auto LOG_HEAD = "Model::loadTensors()";
 
@@ -423,7 +423,7 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
         const int64_t embedingVGqa      = params.attentionValueLength * params.attentionHeadCountKv;
         const int64_t embedingGqa       = embedingVGqa;
         const int64_t vocabSize         = params.vocabSize;
-        const int64_t vocabType         = params.vocabTypeCount;
+        //const int64_t vocabType         = params.vocabTypeCount;
         const int64_t feedForwardLength = params.feedForwardLength;
         const int64_t expertCount       = params.expertCount;
 
@@ -436,7 +436,7 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
 
         ggml_context * ctxInput        = type2contexts.at(layerBufferTypeInput.bufferType);
         ggml_context * ctxOutput       = type2contexts.at(layerBufferTypeOutput.bufferType);
-        ggml_context * ctxOutputSplit  = type2contexts.at(layerBufferTypeOutput.bufferTypeMatrix);
+        //ggml_context * ctxOutputSplit  = type2contexts.at(layerBufferTypeOutput.bufferTypeMatrix);
         auto ctxForLayer               = [&](int i) { return type2contexts.at(layerBufferTypes[i].bufferType); };
         auto ctxForLayerSplit          = [&](int i) { return type2contexts.at(layerBufferTypes[i].bufferTypeMatrix); };
 
@@ -646,17 +646,17 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
             return false;
         }
 
-        for (auto &buf : bufs) {
+        for (auto &b : bufs) {
             // indicate that this buffer contains weights
             // this is used by ggml_backend_sched to improve op scheduling -> ops that use a weight are preferably
             // scheduled to the backend that contains the weight
-            ggml_backend_buffer_set_usage(buf.second, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+            ggml_backend_buffer_set_usage(b.second, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
         }
 
         contextBuffers.emplace_back(ctx, bufs);
     }
 
-    if (llama_supports_gpu_offload()) {
+    if (supportGpuOffload()) {
         const int numGpu = std::min(numGpuLayers, int(params.layerCount));
 
         spdlog::info("{}: offloading {} repeating layers to GPU", LOG_HEAD, numGpu);
@@ -693,7 +693,7 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
         ggml_context *ctx = it.first;
         auto &bufs = it.second;
         if (!ml.loadData(
-                ctx, bufs, mUseMemoryLock? &mlock_mmaps : NULL, progress_callback, progress_callback_user_data)) {
+                ctx, bufs, useMemoryLock? &mMemoryLocks : NULL)) {
             return false;
         }
     }
