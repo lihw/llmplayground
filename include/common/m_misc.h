@@ -16,6 +16,8 @@
 
 M_BEGIN_NAMESPACE
 
+#define M_NOTUSE(x) (void)(x)
+
 extern void replaceAll(std::string& s, const std::string& search, const std::string& replace);
 
 extern size_t utf8Len(char src) noexcept;

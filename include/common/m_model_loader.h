@@ -75,7 +75,7 @@ public:
 
         // Keep the booleans together to avoid misalignment during copy-by-value.
         bool vocabOnly = false; // only load the vocabulary, no weights
-        //bool use_mmap;   // use mmap if possible
+        bool useMmap = true;   // use mmap if possible
         bool useMemoryLock = true;  // force system to keep model in RAM
     } params;
 

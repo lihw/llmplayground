@@ -256,6 +256,14 @@ bool ModelLoader::loadData(
         std::unordered_map<uint32_t, ggml_backend_buffer_t>& bufferMap,
         MemoryLocks* memoryLocks) {
 
+    const auto LOG_HEAD = "MeshLoader::loadData()";
+
+    if (mUseMmap) {
+        spdlog::info("{}: Mmaping enabled", LOG_HEAD);
+    } else {
+        spdlog::info("{}: Mmaping disabled", LOG_HEAD);
+    }
+
     size_t loadedBytes = 0;
     size_t totalBytes = 0;
 
@@ -293,7 +301,7 @@ bool ModelLoader::loadData(
                 ggml_backend_tensor_alloc(mmapBuffer, cur, (uint8_t *)mmap->addr + weight->offset);
                 if (memoryLocks) {
                     const auto & lmlock = memoryLocks->at(weight->idx);
-                    lmlock->growTo(weight->offset + ggml_nbytes(cur));
+                    lmlock->growTo(weight->offset + numBytes);
                 }
 
                 auto & usedMmap = mUsedMmaps[weight->idx];
@@ -307,14 +315,17 @@ bool ModelLoader::loadData(
             const auto & file = mFiles.at(weight->idx);
             if (ggml_backend_buffer_is_host(cur->buffer)) {
                 file->seek(weight->offset, SEEK_SET);
-                file->readRaw(cur->data, ggml_nbytes(cur));
+                file->readRaw(cur->data, numBytes);
             } else {
-                readBuffer.resize(ggml_nbytes(cur));
+                readBuffer.resize(numBytes);
                 file->seek(weight->offset, SEEK_SET);
-                file->readRaw(readBuffer.data(), ggml_nbytes(cur));
+                file->readRaw(readBuffer.data(), numBytes);
                 ggml_backend_tensor_set(cur, readBuffer.data(), 0, numBytes);
             }
         }
+
+        spdlog::info("{}: model tensor {} with {:5.3f} MB are loaded",
+            LOG_HEAD, ggml_get_name(cur), float(numBytes) / 1024.0f / 1024.0f);
 
         loadedBytes += numBytes;
     }
@@ -337,6 +348,14 @@ bool ModelLoader::loadData(
             // cancellation since we need to free allocations.
         //    return progress_callback(1.0f, progress_callback_user_data);
         //}
+
+        spdlog::info("{}: the model data are all loaded with total size = {:5.3f}MB",
+            LOG_HEAD, float(loadedBytes) / 1024.0f / 1024.0f);
+
+    } else {
+        spdlog::error("{}: the loaded data is less than the required {} vs {} bytes",
+            LOG_HEAD, loadedBytes, totalBytes);
+        return false;
     }
 
     return true;

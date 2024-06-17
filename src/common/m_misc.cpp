@@ -432,7 +432,8 @@ Mmap::Mmap(File* file, size_t prefetch, bool numa) {
 }
 
 void Mmap::unmapRange(size_t first, size_t last) {
-    assert(first == 0 && last == 0);
+    M_NOTUSE(first);
+    M_NOTUSE(last);
 }
 
 Mmap::~Mmap() {
@@ -444,16 +445,16 @@ Mmap::~Mmap() {
 #else
 
 Mmap::Mmap(struct llama_file* file, size_t prefetch, bool numa) {
-    GGML_UNUSED(file);
-    GGML_UNUSED(prefetch);
-    GGML_UNUSED(numa);
+    M_NOTUSE(file);
+    M_NOTUSE(prefetch);
+    M_NOTUSE(numa);
 
     throw std::runtime_error("mmap not supported");
 }
 
 void Mmap::unmapRange(size_t first, size_t last) {
-    GGML_UNUSED(first);
-    GGML_UNUSED(last);
+    M_NOTUSE(first);
+    M_NOTUSE(last);
 
     throw std::runtime_error("mmap not supported");
 }

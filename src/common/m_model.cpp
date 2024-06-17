@@ -284,6 +284,7 @@ static ggml_backend_buffer_type_t getDefaultBufferTypeCpu(bool host_buffer) {
     GGML_UNUSED(host_buffer);
 }
 
+#if 0
 static ggml_backend_buffer_type_t getDefaultBufferTypeOffload(int gpu) 
 {
     ggml_backend_buffer_type_t buft = nullptr;
@@ -312,7 +313,7 @@ static ggml_backend_buffer_type_t getDefaultBufferTypeOffload(int gpu)
 
     GGML_UNUSED(gpu);
 }
-
+#endif
 
 bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool useMemoryLock)  
 {
@@ -329,121 +330,34 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
     //ml.get_key(LLM_KV_EXPERT_COUNT,         hparams.n_expert,      false);
     //ml.get_key(LLM_KV_EXPERT_USED_COUNT,    hparams.n_expert_used, false);
 
-    //model.split_mode   = split_mode;
-    //model.main_gpu     = main_gpu;
-    //model.n_gpu_layers = n_gpu_layers;
+    // FIXME: we don't support offloading to GPU yet.
+    assert(mainGpu == -1 && numGpuLayers == 0);
 
     const int64_t numLayers = params.layerCount;
-    const int64_t gpuStartLayerIndex = std::max(numLayers - numGpuLayers, (int64_t)0);
-    //bool use_mmap_buffer = true;
-
-    // there is very little benefit to offloading the input layer, so always keep it on the CPU
-    layerBufferTypeInput = getDefaultBufferTypeCpu(true);
-
-    layerBufferTypes.resize(numLayers);
-    // assign cpu layers
-    for (int64_t i = 0; i < gpuStartLayerIndex; ++i) {
-        layerBufferTypes[i] = getDefaultBufferTypeCpu(true);
-    }
-
-    //if (split_mode == LLAMA_SPLIT_MODE_LAYER) {
-    //    // calculate the split points
-    //    int device_count = llama_get_device_count();
-    //    bool all_zero = tensor_split == nullptr || std::all_of(tensor_split, tensor_split + device_count, [](float x) { return x == 0.0f; });
-    //    std::vector<float> splits(device_count);
-    //    if (all_zero) {
-    //        // default split, by free memory
-    //        for (int i = 0; i < device_count; ++i) {
-    //            splits[i] = llama_get_device_memory(i);
-    //        }
-    //    } else {
-    //        std::copy(tensor_split, tensor_split + device_count, splits.begin());
-    //    }
-
-    //    // sum and normalize the splits to get the split points
-    //    float split_sum = 0.0f;
-    //    for (int i = 0; i < device_count; ++i) {
-    //        split_sum += splits[i];
-    //        splits[i] = split_sum;
-    //    }
-    //    for (int i = 0; i < device_count; ++i) {
-    //        splits[i] /= split_sum;
-    //    }
-
-    //    // assign the repeating layers to the devices according to the splits
-    //    int act_gpu_layers = std::min(n_gpu_layers, (int)n_layer + 1);
-    //    for (int64_t i = i_gpu_start; i < n_layer; ++i) {
-    //        int layer_gpu = std::upper_bound(splits.begin(), splits.begin() + device_count, float(i - i_gpu_start)/act_gpu_layers) - splits.begin();
-    //        model.buft_layer[i] = llama_default_buffer_type_offload(layer_gpu);
-    //    }
-    //    // assign the output layer
-    //    if (n_gpu_layers > n_layer) {
-    //        int layer_gpu = std::upper_bound(splits.begin(), splits.begin() + device_count, float(act_gpu_layers - 1)/act_gpu_layers) - splits.begin();
-    //        model.buft_output = llama_default_buffer_type_offload(layer_gpu);
-    //    } else {
-    //        model.buft_output = llama_default_buffer_type_cpu(true);
-    //    }
-    //} else {
-    {
-        ggml_backend_buffer_type_t splitLayerBufferType;
-        //if (splitMode == LLAMA_SPLIT_MODE_ROW) {
-        //    splitLayerBufferType = llama_default_buffer_type_split(main_gpu, tensor_split);
-        //} else {
-            // LLAMA_SPLIT_MODE_NONE or LLAMA_SPLIT_MODE_LAYER in backends where it is not supported
-        splitLayerBufferType = getDefaultBufferTypeOffload(mainGpu);
-        //}
-        // assign the repeating layers
-        for (int64_t i = gpuStartLayerIndex; i < numLayers; ++i) {
-            layerBufferTypes[i] = {
-                splitLayerBufferType,
-                getDefaultBufferTypeOffload(mainGpu)
-            };
-        }
-        // assign the output layer
-        if (numGpuLayers > numLayers) {
-            layerBufferTypeOutput = {
-                splitLayerBufferType,
-                getDefaultBufferTypeOffload(mainGpu)
-            };
-        } else {
-            layerBufferTypeOutput = getDefaultBufferTypeCpu(true);
-        }
-    }
-
-    // count used buffer types
-    std::map<ggml_backend_buffer_type_t, int> layerBufferTypeCount{};
-    layerBufferTypeCount[layerBufferTypeInput.bufferType]++;
-    layerBufferTypeCount[layerBufferTypeInput.bufferTypeMatrix]++;
-    layerBufferTypeCount[layerBufferTypeOutput.bufferType]++;
-    layerBufferTypeCount[layerBufferTypeOutput.bufferTypeMatrix]++;
-    for (int64_t i = 0; i < params.layerCount; ++i) {
-        layerBufferTypeCount[layerBufferTypes[i].bufferTypeMatrix]++;
-        layerBufferTypeCount[layerBufferTypes[i].bufferType]++;
-    }
 
     // create one context per buffer type
     size_t ctxSize = ggml_tensor_overhead() * (ml.getTensorCount() + 1); // +1 for models where tok_embd is duplicated as output
 
-    // for moe merged tensors
+    // for more merged tensors
     ctxSize += ggml_tensor_overhead() * params.expertCount * params.layerCount;
+    
+    // We only have one context and one buffer type. That is CPU.
+    auto bufferType = getDefaultBufferTypeCpu(true);
 
-    std::map<ggml_backend_buffer_type_t, ggml_context *> type2contexts;
-    for (auto & it : layerBufferTypeCount) {
-        struct ggml_init_params p = {
+    struct ggml_init_params p = {
             /*.mem_size   =*/ ctxSize,
             /*.mem_buffer =*/ NULL,
             /*.no_alloc   =*/ true,
         };
+    {
         ggml_context * ctx = ggml_init(p);
         if (!ctx) {
             throw std::runtime_error("failed to create context");
-            return false;
         }
-        type2contexts[it.first] = ctx;
-        mContexts.push_back(ctx);
+        mContexts.push_back(ctx); // We only have one context that is to compute in CPU.
+        spdlog::info("{}: ggml ctx size = {:7.2} MiB", LOG_HEAD, mContexts.size() * ctxSize / 1024.0 / 1024.0);
     }
-
-    spdlog::info("{}: ggml ctx size = {:7.2} MiB", LOG_HEAD, mContexts.size() * ctxSize/1024.0/1024.0);
+    
 
     // create tensors for the weights
     {
@@ -458,20 +372,18 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
 
         if (expertCount > 0 && params.expertUsedCount == 0) {
             throw std::runtime_error("model has expert layers but no expert layers are used");
-            return false;
         }
 
         assert(embedingGqa == embedingKGqa);
 
-        ggml_context * ctxInput        = type2contexts.at(layerBufferTypeInput.bufferType);
-        ggml_context * ctxOutput       = type2contexts.at(layerBufferTypeOutput.bufferType);
-        ggml_context * ctxOutputSplit  = type2contexts.at(layerBufferTypeOutput.bufferTypeMatrix);
-        auto ctxForLayer               = [&](int i) { return type2contexts.at(layerBufferTypes[i].bufferType); };
-        auto ctxForLayerSplit          = [&](int i) { return type2contexts.at(layerBufferTypes[i].bufferTypeMatrix); };
+        ggml_context * ctxInput        = mContexts[0];
+        ggml_context * ctxOutput       = mContexts[0];
+        ggml_context * ctxOutputSplit  = mContexts[0];
+        auto ctxForLayer               = [&]() { return mContexts[0]; };
+        auto ctxForLayerSplit          = [&]() { return mContexts[0]; };
 
         mLayers.resize(numLayers);
 
-        //const auto tn = LLM_TN(model.arch);
         const auto tn = TensorNameTranslator(arch);
         if (arch == Arch::LLAMA) {
             // input
@@ -490,8 +402,8 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
             
             // layers
             for (int i = 0; i < numLayers; ++i) {
-                ggml_context *ctxLayer = ctxForLayer(i);
-                ggml_context *ctxSplit = ctxForLayerSplit(i);
+                ggml_context *ctxLayer = ctxForLayer();
+                ggml_context *ctxSplit = ctxForLayerSplit();
 
                 auto &layer = mLayers[i];
                 
@@ -530,206 +442,81 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
 
                 layer.ffn_norm = ml.createTensor(ctxLayer, tn(Tensor::FFN_NORM, "weight", i), { embedingLength});
 
-                //if (expertCount == 0) {
-                    layer.ffn_gate =
-                        ml.createTensor(ctxSplit, tn(Tensor::FFN_GATE, "weight", i), { embedingLength, feedForwardLength });
-                    layer.ffn_down =
-                        ml.createTensor(ctxSplit, tn(Tensor::FFN_DOWN, "weight", i), { feedForwardLength, embedingLength });
-                    layer.ffn_up = ml.createTensor(ctxSplit, tn(Tensor::FFN_UP, "weight", i), { embedingLength, feedForwardLength });
-                //} else {
-                //    layer.ffn_gate_inp =
-                //        ml.createTensor(ctxLayer, tn(Tensor::FFN_GATE_INP, "weight", i), { embedingLength, expertCount });
-
-                //    layer.ffn_gate_exps = ml.createTensor(
-                //        ctxSplit, tn(Tensor::FFN_GATE_EXPS, "weight", i), { embedingLength, feedForwardLength, expertCount }, false);
-                //    if (layer.ffn_gate_exps) {
-                //        layer.ffn_down_exps = ml.createTensor(
-                //            ctxSplit, tn(Tensor::FFN_DOWN_EXPS, "weight", i), { feedForwardLength, embedingLength, expertCount });
-                //        layer.ffn_up_exps = ml.createTensor(
-                //            ctxSplit, tn(Tensor::FFN_UP_EXPS, "weight", i), { embedingLength, feedForwardLength, expertCount });
-                //    } else {
-                //        // merge split expert into a single tensor for compatibility with older models
-                //        // requires disabling mmap
-                //        //use_mmap_buffer = false;
-
-                //        ggml_type type_gate =
-                //            ml.require_tensor_meta(tn(Tensor::FFN_GATE_EXP, "weight", i, 0).c_str())->type;
-                //        ggml_type type_down =
-                //            ml.require_tensor_meta(tn(Tensor::FFN_DOWN_EXP, "weight", i, 0).c_str())->type;
-                //        ggml_type type_up =
-                //            ml.require_tensor_meta(tn(Tensor::FFN_UP_EXP, "weight", i, 0).c_str())->type;
-
-                //        layer.ffn_gate_exps = ggml_new_tensor_3d(ctxSplit, type_gate, embedingLength, feedForwardLength, expertCount);
-                //        layer.ffn_down_exps = ggml_new_tensor_3d(ctxSplit, type_down, feedForwardLength, embedingLength, expertCount);
-                //        layer.ffn_up_exps = ggml_new_tensor_3d(ctxSplit, type_up, embedingLength, feedForwardLength, expertCount);
-
-                //        ggml_set_name(layer.ffn_gate_exps, tn(Tensor::FFN_GATE_EXPS, "weight", i).c_str());
-                //        ggml_set_name(layer.ffn_down_exps, tn(Tensor::FFN_DOWN_EXPS, "weight", i).c_str());
-                //        ggml_set_name(layer.ffn_up_exps, tn(Tensor::FFN_UP_EXPS, "weight", i).c_str());
-
-                //        for (uint32_t x = 0; x < n_expert; ++x) {
-                //            // the individual experts are loaded into a view of the merged tensor
-                //            ml.createTensor_as_view(ctxSplit,
-                //                layer.ffn_gate_exps,
-                //                tn(Tensor::FFN_GATE_EXP, "weight", i, x),
-                //                { embedingLength, feedForwardLength },
-                //                layer.ffn_gate_exps->nb[2] * x);
-                //            ml.createTensor_as_view(ctxSplit,
-                //                layer.ffn_down_exps,
-                //                tn(Tensor::FFN_DOWN_EXP, "weight", i, x),
-                //                { feedForwardLength, embedingLength },
-                //                layer.ffn_down_exps->nb[2] * x);
-                //            ml.createTensor_as_view(ctxSplit,
-                //                layer.ffn_up_exps,
-                //                tn(Tensor::FFN_UP_EXP, "weight", i, x),
-                //                { embedingLength, feedForwardLength },
-                //                layer.ffn_up_exps->nb[2] * x);
-                //        }
-                //    }
-                //}
+                layer.ffn_gate =
+                    ml.createTensor(ctxSplit, tn(Tensor::FFN_GATE, "weight", i), { embedingLength, feedForwardLength });
+                layer.ffn_down =
+                    ml.createTensor(ctxSplit, tn(Tensor::FFN_DOWN, "weight", i), { feedForwardLength, embedingLength });
+                layer.ffn_up = ml.createTensor(ctxSplit, tn(Tensor::FFN_UP, "weight", i), { embedingLength, feedForwardLength });
             }
         }
     }
 
     ml.areAllTensorsCreated();
 
-    //ml.init_mappings(true, useMemoryLock? &model.mlock_mmaps : nullptr);
+    ml.initializeMappings(true, useMemoryLock? &mMemoryLocks: nullptr);
     //model.mappings.reserve(ml.mappings.size());
     
     using BufferMap = std::unordered_map<uint32_t, ggml_backend_buffer_t>;
 
     // create the backend buffers
     std::vector<std::pair<ggml_context *, BufferMap>> contextBuffers;
-    contextBuffers.reserve(type2contexts.size());
+    contextBuffers.reserve(1);
 
     // Ensure we have enough capacity for the maximum backend buffer we will potentially create
-    size_t maxBackendBuffers = type2contexts.size() * ml.getFiles().size();
+    size_t maxBackendBuffers = ml.getFiles().size();
     mBuffers.reserve(maxBackendBuffers);
 
-    for (auto &it : type2contexts) {
-        ggml_backend_buffer_type_t buft = it.first;
-        ggml_context *ctx = it.second;
+    BufferMap bufs;
+    bufs.reserve(maxBackendBuffers);
 
-        BufferMap bufs;
-        bufs.reserve(maxBackendBuffers);
-
-        // only the mmap region containing the tensors in the model is mapped to the backend buffer
-        // this is important for metal with apple silicon: if the entire model could be mapped to a metal buffer,
-        // then we could just use metal for all layers this allows using partial offloading when the model size
-        // exceeds the metal buffer size, but not the RAM size
-        //if (ml.use_mmap && use_mmap_buffer && buft == llama_default_buffer_type_cpu(true)) {
-        //    for (uint32_t idx = 0; idx < ml.files.size(); idx++) {
-        //        void *addr = nullptr;
-        //        size_t first, last;
-        //        ml.get_mapping_range(&first, &last, &addr, idx, ctx);
-        //        if (first >= last) {
-        //            continue;
-        //        }
-        //        ggml_backend_buffer_t buf = ggml_backend_cpu_buffer_from_ptr((char *)addr + first, last - first);
-        //        if (buf == nullptr) {
-        //            throw std::runtime_error("unable to allocate backend CPU buffer");
-        //        }
-        //        model.bufs.push_back(buf);
-        //        bufs.emplace(idx, buf);
-#ifdef GGML_USE_CUDA
-                if (n_layer >= n_gpu_layers) {
-                    ggml_backend_cuda_register_host_buffer(
-                        ggml_backend_buffer_get_base(buf), ggml_backend_buffer_get_size(buf));
-                }
-#endif
-        //    }
-        //}
-#ifdef GGML_USE_METAL
-        else if (ml.use_mmap && use_mmap_buffer && buft == ggml_backend_metal_buffer_type()) {
-            for (uint32_t idx = 0; idx < ml.files.size(); idx++) {
-                const size_t max_size = ggml_get_max_tensor_size(ctx);
-                void *addr = nullptr;
-                size_t first, last;
-                ml.get_mapping_range(&first, &last, &addr, idx, ctx);
-                if (first >= last) {
-                    continue;
-                }
-                ggml_backend_buffer_t buf =
-                    ggml_backend_metal_buffer_from_ptr((char *)addr + first, last - first, max_size);
-                if (buf == nullptr) {
-                    throw std::runtime_error("unable to allocate backend metal buffer");
-                }
-                model.bufs.push_back(buf);
-                bufs.emplace(idx, buf);
-            }
-        }
-#endif
-        //else {
-        ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors_from_buft(ctx, buft);
-        if (buf == nullptr) {
-            throw std::runtime_error("unable to allocate backend buffer");
-            return false;
-        }
-        mBuffers.push_back(buf);
-        if (useMemoryLock && ggml_backend_buffer_is_host(buf)) {
-            mMemoryLocks.emplace_back(new MemoryLock);
-            auto &mlock = mMemoryLocks.back();
-            mlock->initialize(ggml_backend_buffer_get_base(buf));
-            mlock->growTo(ggml_backend_buffer_get_size(buf));
-        }
-        for (uint32_t idx = 0; idx < ml.getFiles().size(); idx++) {
-            bufs.emplace(idx, buf);
-        }
-        //}
-
-        if (bufs.empty()) {
-            throw std::runtime_error("failed to allocate buffer");
-            return false;
-        }
-
-        for (auto &b : bufs) {
-            // indicate that this buffer contains weights
-            // this is used by ggml_backend_sched to improve op scheduling -> ops that use a weight are preferably
-            // scheduled to the backend that contains the weight
-            ggml_backend_buffer_set_usage(b.second, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
-        }
-
-        contextBuffers.emplace_back(ctx, bufs);
+    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors_from_buft(mContexts[0], bufferType);
+    if (buf == nullptr) {
+        throw std::runtime_error("unable to allocate backend buffer");
+        return false;
+    }
+    mBuffers.push_back(buf);
+    if (useMemoryLock && ggml_backend_buffer_is_host(buf)) {
+        mMemoryLocks.emplace_back(new MemoryLock);
+        auto &mlock = mMemoryLocks.back();
+        mlock->initialize(ggml_backend_buffer_get_base(buf));
+        mlock->growTo(ggml_backend_buffer_get_size(buf));
+    }
+    for (uint32_t idx = 0; idx < ml.getFiles().size(); idx++) {
+        bufs.emplace(idx, buf);
     }
 
-    if (supportGpuOffload()) {
-        const int numGpu = std::min(numGpuLayers, int(params.layerCount));
-
-        spdlog::info("{}: offloading {} repeating layers to GPU", LOG_HEAD, numGpu);
-        if (numGpuLayers > (int)params.layerCount) {
-            spdlog::info("{}: offloading non-repeating layers to GPU", LOG_HEAD);
-        }
-
-        const int maxBackendSupportedLayers = params.layerCount + 1;
-        const int maxOffloadableLayers = params.layerCount + 1;
-
-        spdlog::info("{}: offloaded %d/%d layers to GPU\n",
-            LOG_HEAD,
-            std::min(numGpuLayers, maxOffloadableLayers),
-            maxBackendSupportedLayers);
+    if (bufs.empty()) {
+        throw std::runtime_error("failed to allocate buffer");
+        return false;
     }
+
+    for (auto &b : bufs) {
+        // indicate that this buffer contains weights
+        // this is used by ggml_backend_sched to improve op scheduling -> ops that use a weight are preferably
+        // scheduled to the backend that contains the weight
+        ggml_backend_buffer_set_usage(b.second, GGML_BACKEND_BUFFER_USAGE_WEIGHTS);
+    }
+
+    contextBuffers.emplace_back(mContexts[0], bufs);
 
     // print memory requirements
-    for (ggml_backend_buffer_t buf : mBuffers) {
+    for (ggml_backend_buffer_t b : mBuffers) {
         spdlog::info("{}: {:10s} buffer size = {:8.2f} MiB\n",
             LOG_HEAD,
-            ggml_backend_buffer_name(buf),
-            ggml_backend_buffer_get_size(buf) / 1024.0 / 1024.0);
+            ggml_backend_buffer_name(b),
+            ggml_backend_buffer_get_size(b) / 1024.0 / 1024.0);
     }
 
     // populate tensors_by_name
-    for (ggml_context *ctx : mContexts) {
-        for (auto *cur = ggml_get_first_tensor(ctx); cur != NULL; cur = ggml_get_next_tensor(ctx, cur)) {
+    for (ggml_context *c : mContexts) {
+        for (auto *cur = ggml_get_first_tensor(c); cur != NULL; cur = ggml_get_next_tensor(c, cur)) {
             mTensorsByName.emplace_back(ggml_get_name(cur), cur);
         }
     }
 
     // load tensor data
     for (auto &it : contextBuffers) {
-        ggml_context *ctx = it.first;
-        auto &bufs = it.second;
-        if (!ml.loadData(
-                ctx, bufs, useMemoryLock? &mMemoryLocks : NULL)) {
+        if (!ml.loadData(it.first, it.second, useMemoryLock? &mMemoryLocks : NULL)) {
             return false;
         }
     }
