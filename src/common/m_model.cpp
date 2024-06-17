@@ -20,7 +20,7 @@ static const std::map<Arch, std::map<Tensor, std::string>> TENSOR_NAMES = {
     {
         Arch::LLAMA,
         {
-            { Tensor::TOKEN_EMBD,      "tokeembedingLength" },
+            { Tensor::TOKEN_EMBD,      "token_embd" },
             { Tensor::OUTPUT_NORM,     "output_norm" },
             { Tensor::OUTPUT,          "output" },
             { Tensor::ROPE_FREQS,      "rope_freqs" },
@@ -44,6 +44,23 @@ static const std::map<Arch, std::map<Tensor, std::string>> TENSOR_NAMES = {
         },
     }
 };
+
+Model::Model() {
+}
+
+Model::~Model() {
+    for (struct ggml_context * ctx : mContexts) {
+        ggml_free(ctx);
+    }
+    for (ggml_backend_buffer_t buf : mBuffers) {
+#ifdef GGML_USE_CUDA
+        if (ggml_backend_buffer_get_type(buf) == ggml_backend_cpu_buffer_type()) {
+            ggml_backend_cuda_unregister_host_buffer(ggml_backend_buffer_get_base(buf));
+        }
+#endif
+        ggml_backend_buffer_free(buf);
+    }
+}
 
 struct TensorNameTranslator {
     TensorNameTranslator(Arch arch) : arch(arch) {}
@@ -105,6 +122,13 @@ bool Model::loadParameters(ModelLoader& ml)
         const char * n = gguf_get_key(ctx, i);
         const std::string v = ggufKvToStr(ctx, i);
         ggufKv.emplace(n, v);
+    }
+
+    if (ml.getArchName() == "llama") {
+        arch = Arch::LLAMA;
+    } else {
+        assert(!"Unsupported model");
+        return false;
     }
 
     // get general kv
@@ -178,7 +202,7 @@ bool Model::loadParameters(ModelLoader& ml)
     ml.getKey(Kv::ATTENTION_VALUE_LENGTH, params.attentionValueLength, false);
 
     // arch-specific KVs
-    if (ml.getArchName() == "LLAMA") {
+    if (arch == Arch::LLAMA) {
         // getKey(Kv::ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
 
         if (params.expertCount == 8) {
@@ -225,6 +249,11 @@ bool Model::loadParameters(ModelLoader& ml)
     }
 
     return true;
+}
+    
+bool Model::loadVocab(ModelLoader& ml) 
+{
+    return vocab.load(ml);
 }
 
 static ggml_backend_buffer_type_t getDefaultBufferTypeCpu(bool host_buffer) {
@@ -393,15 +422,15 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
     }
 
     // create one context per buffer type
-    size_t ctx_size = ggml_tensor_overhead() * (ml.getTensorCount() + 1); // +1 for models where tok_embd is duplicated as output
+    size_t ctxSize = ggml_tensor_overhead() * (ml.getTensorCount() + 1); // +1 for models where tok_embd is duplicated as output
 
     // for moe merged tensors
-    ctx_size += ggml_tensor_overhead() * params.expertCount * params.layerCount;
+    ctxSize += ggml_tensor_overhead() * params.expertCount * params.layerCount;
 
     std::map<ggml_backend_buffer_type_t, ggml_context *> type2contexts;
     for (auto & it : layerBufferTypeCount) {
         struct ggml_init_params p = {
-            /*.mem_size   =*/ ctx_size,
+            /*.mem_size   =*/ ctxSize,
             /*.mem_buffer =*/ NULL,
             /*.no_alloc   =*/ true,
         };
@@ -414,7 +443,7 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
         mContexts.push_back(ctx);
     }
 
-    spdlog::info("{}: ggml ctx size = %7.2f MiB", LOG_HEAD, mContexts.size() * ctx_size/1024.0/1024.0);
+    spdlog::info("{}: ggml ctx size = {:7.2} MiB", LOG_HEAD, mContexts.size() * ctxSize/1024.0/1024.0);
 
     // create tensors for the weights
     {
@@ -436,7 +465,7 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
 
         ggml_context * ctxInput        = type2contexts.at(layerBufferTypeInput.bufferType);
         ggml_context * ctxOutput       = type2contexts.at(layerBufferTypeOutput.bufferType);
-        //ggml_context * ctxOutputSplit  = type2contexts.at(layerBufferTypeOutput.bufferTypeMatrix);
+        ggml_context * ctxOutputSplit  = type2contexts.at(layerBufferTypeOutput.bufferTypeMatrix);
         auto ctxForLayer               = [&](int i) { return type2contexts.at(layerBufferTypes[i].bufferType); };
         auto ctxForLayerSplit          = [&](int i) { return type2contexts.at(layerBufferTypes[i].bufferTypeMatrix); };
 
@@ -445,19 +474,26 @@ bool Model::loadTensors(ModelLoader& ml, int mainGpu, int32_t numGpuLayers, bool
         //const auto tn = LLM_TN(model.arch);
         const auto tn = TensorNameTranslator(arch);
         if (arch == Arch::LLAMA) {
-            mTensors.token_embed = ml.createTensor(ctxInput, tn(Tensor::TOKEN_EMBD, "weight"), { embedingLength, vocabSize});
+            // input
+            mTensors.token_embed = ml.createTensor(ctxInput, tn(Tensor::TOKEN_EMBD, "weight"), { embedingLength, vocabSize });
 
             // output
             {
-                mTensors.output_norm = ml.createTensor(ctxOutput, tn(Tensor::OUTPUT_NORM, "weight"), { embedingLength});
+                mTensors.output_norm = ml.createTensor(ctxOutput, tn(Tensor::OUTPUT_NORM, "weight"), { embedingLength });
+                mTensors.output = ml.createTensor(ctxOutputSplit, tn(Tensor::OUTPUT, "weight"), { embedingLength, vocabSize}, false);
+                    // if output is NULL, init from the input tok embed
+                    if (mTensors.output == NULL) {
+                        mTensors.output = ml.createTensor(ctxOutput, tn(Tensor::TOKEN_EMBD, "weight"), { embedingLength, vocabSize }, true, false);
+                        //ml.size_data += ggml_nbytes(mTensors.output);
+                    }
             }
-
+            
+            // layers
             for (int i = 0; i < numLayers; ++i) {
                 ggml_context *ctxLayer = ctxForLayer(i);
                 ggml_context *ctxSplit = ctxForLayerSplit(i);
 
                 auto &layer = mLayers[i];
-
                 
                 /**
                   * embedingLength_head_k = (n_head == 0) ? 0 : embedingLength / n_head;

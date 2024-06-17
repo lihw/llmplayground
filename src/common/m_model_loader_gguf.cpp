@@ -322,6 +322,7 @@ Model* ModelLoaderGguf::build() noexcept
         spdlog::error("{}: error loading model parameters", LOG_HEAD);
         return nullptr;
     }
+    spdlog::info("{}: model parameters loaded", LOG_HEAD);
 
     //
     // load model vocab
@@ -331,6 +332,7 @@ Model* ModelLoaderGguf::build() noexcept
         spdlog::info("{}: vocab only - skipping tensors", LOG_HEAD);
         return model;
     }
+    spdlog::info("{}: model vocab loaded", LOG_HEAD);
 
     //
     // load tensors
@@ -339,6 +341,7 @@ Model* ModelLoaderGguf::build() noexcept
         spdlog::error("{}: error loading model parameters", LOG_HEAD);
         return nullptr;
     }
+    spdlog::info("{}: model tensors loaded", LOG_HEAD);
 
     /*
     (

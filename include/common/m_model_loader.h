@@ -168,11 +168,13 @@ public:
     const ggml_tensor* checkTensorDims(const std::string &name, const std::vector<int64_t> &ne, bool required) const;
     /**
      * 
+     * @param artificial True if this tensor doesn't appear in the model file.
     */
     ggml_tensor *createTensor(ggml_context *ctx,
         const std::string &name,
         const std::vector<int64_t> &ne,
-        bool required = true);
+        bool required = true,
+        bool artificial = false);
     /**
      * 
     */
@@ -218,7 +220,7 @@ public:
 
 extern bool supportGpuOffload(void);
 
-extern Model loadModel(const char* file) noexcept;
+extern Model* loadModel(const char* file) noexcept;
 
 M_END_NAMESPACE
 

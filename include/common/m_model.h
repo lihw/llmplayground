@@ -103,8 +103,16 @@ public:
         // enum llama_rope_scaling_type rope_scaling_type_train = LLAMA_ROPE_SCALING_TYPE_NONE;
     } params = {};
 
+    Vocab vocab;
+
 public:
     explicit Model();
+
+    ~Model();
+
+    bool isValid() const {
+        return !mContexts.empty() && !mLayers.empty() && !mTensorsByName.empty();
+    }
 
 private:
     Type type = Type::MODEL_UNKNOWN;
@@ -112,9 +120,6 @@ private:
     GgufType ftype = GgufType::ALL_F32;
 
     std::string name = "n/a";
-
-    Vocab vocab;
-
 
     // llama_split_mode split_mode;
     // int main_gpu;
@@ -141,30 +146,12 @@ private:
     LayerBufferType layerBufferTypeOutput;
     std::vector<LayerBufferType> layerBufferTypes;
 
-
-    //  // model memory mapped files
-    //  llama_mmaps mappings;
-
-    //  ~llama_model() {
-    //      for (struct ggml_context * ctx : ctxs) {
-    //          ggml_free(ctx);
-    //      }
-    //      for (ggml_backend_buffer_t buf : bufs) {
-    // #ifdef GGML_USE_CUDA
-    //             if (ggml_backend_buffer_get_type(buf) == ggml_backend_cpu_buffer_type()) {
-    //                 ggml_backend_cuda_unregister_host_buffer(ggml_backend_buffer_get_base(buf));
-    //             }
-    // #endif
-    //             ggml_backend_buffer_free(buf);
-    //         }
-    //     }
 public:
     bool loadParameters(ModelLoader &ml);
 
     bool loadTensors(ModelLoader &ml, int mainGpu, int32_t numGpuLayers, bool useMemoryLock);
 
     bool loadVocab(ModelLoader& ml);
-
 
 private:
     // contexts where the model tensors metadata is stored
@@ -189,7 +176,7 @@ private:
 
         ggml_tensor *output_norm;
         //ggml_tensor *output_norm_b;
-        //ggml_tensor *output;
+        ggml_tensor *output;
         //ggml_tensor *output_b;
 
     } mTensors;

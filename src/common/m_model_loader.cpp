@@ -7,6 +7,7 @@
 #include <common/m_model_loader.h>
 
 #include <common/m_model_loader_gguf.h>
+#include <common/m_model.h>
 
 #include <ggml/ggml.h>
 #include <ggml/ggml-alloc.h>
@@ -47,7 +48,7 @@ const ModelLoader::Weight* ModelLoader::getWeight(const char * name) const noexc
             return &weight;
         }
     }
-    spdlog::error("{}: tensor '{}' not found", LOG_HEAD, name);
+    spdlog::warn("{}: tensor '{}' not found", LOG_HEAD, name);
     return nullptr;
 }
 
@@ -55,7 +56,6 @@ ggml_tensor* ModelLoader::getTensorMeta(const char* name) const noexcept
 {
     const auto * weight = getWeight(name);
     if (!weight) {
-        spdlog::error("%s: tensor '%s' not found", __func__, name);
         return nullptr;
     }
     return weight->tensor;
@@ -128,14 +128,21 @@ const ggml_tensor* ModelLoader::checkTensorDims(const std::string & name, const 
     return cur;
 }
 
-ggml_tensor * ModelLoader::createTensor(struct ggml_context * ctx, const std::string & name, const std::vector<int64_t> & ne, bool required) {
+ggml_tensor * ModelLoader::createTensor(struct ggml_context * ctx, const std::string & name, const std::vector<int64_t> & ne, bool required, bool artificial) {
     const struct ggml_tensor * cur = checkTensorDims(name, ne, required);
 
     if (cur == NULL) {
         return NULL;
     }
 
-    return createTensorFor(ctx, cur);
+    auto t = createTensorFor(ctx, cur);
+    // When this tensor doesn't appear in the model file, we should not 
+    // add it to the bookkeeping records of model loading.
+    if (artificial) {
+        mNumCreated--;
+    }
+
+    return t;
 }
 
 ggml_tensor * ModelLoader::createTensorAsView(ggml_context * ctx, ggml_tensor * base, const std::string & name, const std::vector<int64_t> & ne, size_t offset, bool required) {
@@ -149,7 +156,6 @@ ggml_tensor * ModelLoader::createTensorAsView(ggml_context * ctx, ggml_tensor * 
 
     if (cur->type != base->type) {
         throw std::runtime_error(fmt::format("{}: tensor '{}' has wrong type; expected {}, got {}", __func__, name.c_str(), ggml_type_name(base->type), ggml_type_name(cur->type)));
-        return nullptr;
     }
 
     std::array<int64_t, GGML_MAX_DIMS> dims;
@@ -175,7 +181,6 @@ bool ModelLoader::areAllTensorsCreated() const  {
     if (mNumCreated != mNumTensors) {
         throw std::runtime_error(fmt::format("{}: wrong number of tensors; expected {}, got {}", 
                 LOG_HEAD, mNumTensors, mNumCreated));
-        return false;
     }
     return true;
 }
@@ -337,15 +342,10 @@ bool ModelLoader::loadData(
     return true;
 }
 
-#if 0
 
-Model::~Model()
+Model* loadModel(const char* file) noexcept 
 {
-    delete ml;
-}
-
-Model loadModel(const char* file) noexcept 
-{
+    /*
     unsigned curPercentage = 0;
     auto progress_callback_user_data = &curPercentage;
     auto progress_callback = [](float progress, void * ctx) {
@@ -360,24 +360,25 @@ Model loadModel(const char* file) noexcept
         }
         return true;
     };
-
+    */
     const char* suffix = strrchr(file, '.');
     if (strncmp(suffix, ".gguf", 5) == 0) {
         ModelLoaderGguf* modelLoader = new ModelLoaderGguf();
         if (!modelLoader->load(std::string(file))) {
             spdlog::error("{}: failed to load model file {}", __func__, file);
             delete modelLoader;
-            return Model();
+            return nullptr;
         }
 
-        return Model(modelLoader);
+        auto* model = modelLoader->build();
+        delete modelLoader;
+        return model;
     } 
 
     spdlog::error("{}: unsupported model format {}", __func__, file);
-    return Model();
+    return nullptr;
 }
 
-#endif
 
 bool supportGpuOffload(void) {
 #if defined(GGML_USE_CUDA) || defined(GGML_USE_CLBLAST) || defined(GGML_USE_METAL) || defined(GGML_USE_VULKAN) || \
