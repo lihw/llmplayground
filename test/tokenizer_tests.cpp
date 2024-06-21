@@ -3,6 +3,7 @@
 #include <common/m_model_loader.h>
 #include <common/m_token.h>
 #include <common/m_vocab.h>
+#include <common/m_model.h>
 
 #include "../src/tokenizer/m_tokenizer_spm.h"
 
@@ -17,12 +18,10 @@ TEST_CASE("tokenizer", "[spm]")
 
     const char* MODEL_FILE = "Llama-2-7b-GGUF/llama-2-7b.gguf";
 
-    m::Model model = m::loadModel(MODEL_FILE);
-    REQUIRE(model.isValid() == true);
+    m::Model* model = m::loadModel(MODEL_FILE);
+    REQUIRE(model->isValid() == true);
 
-    m::Vocab vocab;
-    bool vocabLoaded = vocab.load(*model.ml);
-    REQUIRE(vocabLoaded == true);
+    m::Vocab& vocab = model->vocab;
 
     static std::vector<std::pair<std::string, std::vector<m::TokenId>>> tests = {
         { ""                      , {  }, },

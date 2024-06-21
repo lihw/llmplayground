@@ -196,6 +196,58 @@ enum class GgufVersion {
     V3,
 };
 
+enum Tensor {
+    TOKEN_EMBD,
+    TOKEN_EMBD_NORM,
+    TOKEN_TYPES,
+    POS_EMBD,
+    OUTPUT,
+    OUTPUT_NORM,
+    ROPE_FREQS,
+    ATTN_Q,
+    ATTN_K,
+    ATTN_V,
+    ATTN_QKV,
+    ATTN_OUT,
+    ATTN_NORM,
+    ATTN_NORM_2,
+    ATTN_OUT_NORM,
+    ATTN_ROT_EMBD,
+    FFN_GATE_INP,
+    FFN_GATE_INP_SHEXP,
+    FFN_NORM,
+    FFN_GATE,
+    FFN_DOWN,
+    FFN_UP,
+    FFN_ACT,
+    FFN_DOWN_EXP,  // split experts for backward compatibility
+    FFN_GATE_EXP,
+    FFN_UP_EXP,
+    FFN_DOWN_EXPS, // merged experts
+    FFN_GATE_EXPS,
+    FFN_UP_EXPS,
+    FFN_DOWN_SHEXP,
+    FFN_GATE_SHEXP,
+    FFN_UP_SHEXP,
+    ATTN_Q_NORM,
+    ATTN_K_NORM,
+    LAYER_OUT_NORM,
+    SSM_IN,
+    SSM_CONV1D,
+    SSM_X,
+    SSM_DT,
+    SSM_A,
+    SSM_D,
+    SSM_OUT,
+};
+
+enum class PoolingType {
+    UNSPECIFIED = -1,
+    NONE = 0,
+    MEAN = 1,
+    CLS = 2,
+};
+
 extern Arch getArchFromString(const std::string& name) noexcept;
 
 extern std::string getKvString(Kv kv, Arch arch) noexcept;

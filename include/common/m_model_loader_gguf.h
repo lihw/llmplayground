@@ -22,10 +22,14 @@ public:
 
     virtual bool load(const std::string& file) noexcept final;
 
+    virtual Model* build() noexcept final;
+
 private:
     GgufVersion mVersion = GgufVersion::V1;
     
 };
+
+extern std::string ggufKvToStr(const struct gguf_context * ctx_gguf, int i); 
 
 M_END_NAMESPACE
 

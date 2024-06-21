@@ -7,8 +7,19 @@
 #include <common/m_model_loader.h>
 
 #include <common/m_model_loader_gguf.h>
+#include <common/m_model.h>
+
+#include <ggml/ggml.h>
+#include <ggml/ggml-alloc.h>
+#include <ggml/ggml-backend.h>
 
 #include <spdlog/spdlog.h>
+#include <fmt/core.h>
+
+#include <array>
+
+#undef min
+#undef max
 
 M_BEGIN_NAMESPACE
 
@@ -23,132 +34,128 @@ ModelLoader::~ModelLoader()
     }
 }
 
-#if 0
-template<typename T>
-typename std::enable_if<std::is_integral<T>::value, bool>::type
-get_arr_n(const std::string & key, T & result, const bool required = true) {
-    const int kid = gguf_find_key(meta, key.c_str());
-
-    if (kid < 0) {
-        if (required) {
-            throw std::runtime_error(format("key not found in model: %s", key.c_str()));
-        }
-        return false;
-    }
-
-    struct GGUFMeta::ArrayInfo arr_info =
-        GGUFMeta::GKV<GGUFMeta::ArrayInfo>::get_kv(meta, kid);
-
-
-    result = arr_info.length;
-    return true;
-}
-
-template<typename T>
-typename std::enable_if<std::is_integral<T>::value, bool>::type
-get_arr_n(const enum llm_kv kid, T & result, const bool required = true) {
-    return get_arr_n(llm_kv(kid), result, required);
-}
-#endif
-
-//std::string get_arch_name() const {
-//    return arch_name;
-//}
-//
-//enum llm_arch get_arch() const {
-//    return llm_kv.arch;
-//}
-
 const char* ModelLoader::getTensorName(int i) const noexcept 
 {
     return mWeights.at(size_t(i)).tensor->name;
 }
 
-ModelLoader::Weight* ModelLoader::getWeight(const char * name) noexcept 
+const ModelLoader::Weight* ModelLoader::getWeight(const char * name) const noexcept 
 {
+    const auto LOG_HEAD = "ModelLoader::getWeight()";
+
     for (auto& weight : mWeights) {
         if (strcmp(name, weight.tensor->name) == 0) {
             return &weight;
         }
     }
-    spdlog::error("%s: tensor '%s' not found", __func__, name);
+    spdlog::warn("{}: tensor '{}' not found", LOG_HEAD, name);
     return nullptr;
 }
 
-ggml_tensor* ModelLoader::getTensorMeta(const char* name) noexcept 
+ggml_tensor* ModelLoader::getTensorMeta(const char* name) const noexcept 
 {
     const auto * weight = getWeight(name);
     if (!weight) {
-        spdlog::error("%s: tensor '%s' not found", __func__, name);
         return nullptr;
     }
     return weight->tensor;
 }
 
-ggml_tensor* ModelLoader::getTensorMeta(int i) noexcept
+ggml_tensor* ModelLoader::getTensorMeta(int i) const noexcept
 {
     return getTensorMeta(getTensorName(i));
 }
 
-#if 0
-struct ggml_tensor* ModelLoader::create_tensor_for(struct ggml_context * ctx, const struct ggml_tensor * cur) {
+ggml_tensor* ModelLoader::createTensorFor(ggml_context * ctx, const ggml_tensor * cur) 
+{
     struct ggml_tensor* tensor = ggml_dup_tensor(ctx, cur);
     ggml_set_name(tensor, ggml_get_name(cur));
 
-    n_created++;
+    mNumCreated++;
 
     return tensor;
 }
 
-const struct ggml_tensor * check_tensor_dims(const std::string & name, const std::vector<int64_t> & ne, bool required) const {
-    const struct ggml_tensor * cur = get_tensor_meta(name.c_str());
+const ggml_tensor* ModelLoader::checkTensorDims(const std::string & name, const std::vector<int64_t> & ne, bool required) const {
+    const auto LOG_HEAD = "ModelLoader::checkTensorDims";
 
-    if (cur == NULL) {
-        if (!required) {
-            return NULL;
+    const struct ggml_tensor * cur = getTensorMeta(name.c_str());
+
+    if (cur == nullptr) {
+        if (required) {
+            throw std::runtime_error(fmt::format("{}: tensor '{}' not found", LOG_HEAD, name));
         }
-        throw std::runtime_error(format("%s: tensor '%s' not found", __func__, name.c_str()));
+        
+        return nullptr;
     }
 
     {
-        bool is_ok = true;
+        bool ok = true;
         for (size_t i = 0; i < GGML_MAX_DIMS; ++i) {
             if ((i < ne.size() && ne[i] != cur->ne[i]) || (i >= ne.size() && cur->ne[i] != 1)) {
-                is_ok = false;
+                ok = false;
                 break;
             }
         }
-        if (!is_ok) {
+
+        auto formatTensorShape1 = [](const std::vector<int64_t> &ne) -> std::string {
+                char buf[256];
+                snprintf(buf, sizeof(buf), "%5" PRId64, ne.at(0));
+                for (size_t i = 1; i < ne.size(); i++) {
+                    snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), ", %5" PRId64, ne.at(i));
+                }
+                return buf;
+            };
+        auto formatTensorShape2 = [](const struct ggml_tensor* t) -> std::string {
+                char buf[256];
+                snprintf(buf, sizeof(buf), "%5" PRId64, t->ne[0]);
+                for (int i = 1; i < GGML_MAX_DIMS; i++) {
+                    snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), ", %5" PRId64, t->ne[i]);
+                }
+                return buf;
+            };
+
+        if (!ok)
+        {
             throw std::runtime_error(
-                    format("%s: tensor '%s' has wrong shape; expected %s, got %s",
-                        __func__, name.c_str(),
-                        ggufGetTensorShape(ne).c_str(),
-                        ggufGetTensorShape(cur).c_str()));
+                    fmt::format("{}: tensor '{}' has wrong shape; expected {}, got {}",
+                        LOG_HEAD, name,
+                        formatTensorShape1(ne),
+                        formatTensorShape2(cur)));
         }
     }
 
     return cur;
 }
 
-struct ggml_tensor * create_tensor(struct ggml_context * ctx, const std::string & name, const std::vector<int64_t> & ne, bool required = true) {
-    const struct ggml_tensor * cur = check_tensor_dims(name, ne, required);
+ggml_tensor * ModelLoader::createTensor(struct ggml_context * ctx, const std::string & name, const std::vector<int64_t> & ne, bool required, bool artificial) {
+    const struct ggml_tensor * cur = checkTensorDims(name, ne, required);
 
     if (cur == NULL) {
         return NULL;
     }
 
-    return create_tensor_for(ctx, cur);
+    auto t = createTensorFor(ctx, cur);
+    // When this tensor doesn't appear in the model file, we should not 
+    // add it to the bookkeeping records of model loading.
+    if (artificial) {
+        mNumCreated--;
+    }
+
+    return t;
 }
 
-struct ggml_tensor * create_tensor_as_view(struct ggml_context * ctx, struct ggml_tensor * base, const std::string & name, const std::vector<int64_t> & ne, size_t offset, bool required = true) {
-    const struct ggml_tensor * cur = check_tensor_dims(name, ne, required);
+ggml_tensor * ModelLoader::createTensorAsView(ggml_context * ctx, ggml_tensor * base, const std::string & name, const std::vector<int64_t> & ne, size_t offset, bool required) {
+    //const auto LOG_HEAD = "ModelLoader::createTensorAsView()";
+
+    const struct ggml_tensor * cur = checkTensorDims(name, ne, required);
 
     if (cur == NULL) {
         return NULL;
     }
 
     if (cur->type != base->type) {
-        throw std::runtime_error(format("%s: tensor '%s' has wrong type; expected %s, got %s", __func__, name.c_str(), ggml_type_name(base->type), ggml_type_name(cur->type)));
+        throw std::runtime_error(fmt::format("{}: tensor '{}' has wrong type; expected {}, got {}", __func__, name.c_str(), ggml_type_name(base->type), ggml_type_name(cur->type)));
     }
 
     std::array<int64_t, GGML_MAX_DIMS> dims;
@@ -163,38 +170,39 @@ struct ggml_tensor * create_tensor_as_view(struct ggml_context * ctx, struct ggm
 
     ggml_set_name(tensor, name.c_str());
 
-    n_created++;
+    mNumCreated++;
 
     return tensor;
 }
 
-void done_getting_tensors() const {
-    if (n_created != n_tensors) {
-        throw std::runtime_error(format("%s: wrong number of tensors; expected %d, got %d", __func__, n_tensors, n_created));
+bool ModelLoader::areAllTensorsCreated() const  {
+    const auto LOG_HEAD = "ModelLoader::areAllTensorsCreated()";
+
+    if (mNumCreated != mNumTensors) {
+        throw std::runtime_error(fmt::format("{}: wrong number of tensors; expected {}, got {}", 
+                LOG_HEAD, mNumTensors, mNumCreated));
     }
+    return true;
 }
 
-void init_mappings(bool prefetch = true, llama_mlocks * mlock_mmaps = nullptr) {
-    if (use_mmap) {
-        mappings.reserve(files.size());
-        mmaps_used.reserve(files.size());
-        for (const auto & file : files) {
-            std::unique_ptr<llama_mmap> mapping(new llama_mmap(file.get(), prefetch ? -1 : 0, ggml_is_numa()));
-            mmaps_used.emplace_back(mapping->size, 0);
-            if (mlock_mmaps) {
-                std::unique_ptr<llama_mlock> mlock_mmap(new llama_mlock());
-                mlock_mmap->init(mapping->addr);
-                mlock_mmaps->emplace_back(std::move(mlock_mmap));
+void ModelLoader::initializeMappings(bool prefetch, MemoryLocks* memoryLocks) {
+    if (mUseMmap) {
+        mMmaps.reserve(mFiles.size());
+        mUsedMmaps.reserve(mFiles.size());
+        for (const auto & file : mFiles) {
+            std::unique_ptr<Mmap> mapping(new Mmap(file.get(), prefetch ? -1 : 0, ggml_is_numa()));
+            mUsedMmaps.emplace_back(mapping->size, 0);
+            if (memoryLocks) {
+                std::unique_ptr<MemoryLock> memoryLock(new MemoryLock());
+                memoryLock->initialize(mapping->addr);
+                memoryLocks->emplace_back(std::move(memoryLock));
             }
-            mappings.emplace_back(std::move(mapping));
+            mMmaps.emplace_back(std::move(mapping));
         }
     }
-
-    // compute the total size of all tensors for progress reporting
-    for (auto & w : weights) {
-        size_data += ggml_nbytes(w.tensor);
-    }
 }
+
+#if 0
 
 void get_mapping_range(size_t * first, size_t * last, void ** addr, int idx, ggml_context * ctx) const {
     GGML_ASSERT(!mappings.empty());
@@ -240,105 +248,123 @@ void load_data_for(struct ggml_tensor * cur) const {
     }
 }
 
-size_t size_done = 0;
-size_t size_data = 0;
-std::vector<std::pair<size_t, size_t>> mmaps_used;
+#endif 
 
 // Returns false if cancelled by progress_callback
-bool load_all_data(
-        struct ggml_context * ctx,
-        llama_buf_map & bufs_mmap,
-        llama_mlocks * lmlocks,
-        llama_progress_callback progress_callback,
-        void * progress_callback_user_data) {
-    GGML_ASSERT(size_data != 0 && "call init_mappings() first");
+bool ModelLoader::loadData(
+        ggml_context* ctx,
+        std::unordered_map<uint32_t, ggml_backend_buffer_t>& bufferMap,
+        MemoryLocks* memoryLocks) {
 
-    std::vector<no_init<uint8_t>> read_buf;
-    for (struct ggml_tensor * cur = ggml_get_first_tensor(ctx); cur != NULL; cur = ggml_get_next_tensor(ctx, cur)) {
-        const auto * weight = get_weight(ggml_get_name(cur));
+    const auto LOG_HEAD = "MeshLoader::loadData()";
+
+    if (mUseMmap) {
+        spdlog::info("{}: Mmaping enabled", LOG_HEAD);
+    } else {
+        spdlog::info("{}: Mmaping disabled", LOG_HEAD);
+    }
+
+    size_t loadedBytes = 0;
+    size_t totalBytes = 0;
+
+    // compute the total size of all tensors for progress reporting
+    for (auto& w : mWeights) {
+        totalBytes += ggml_nbytes(w.tensor);
+    }
+
+    //assert(size_data != 0 && "call init_mappings() first");
+
+    std::vector<uint8_t> readBuffer;
+    for (ggml_tensor * cur = ggml_get_first_tensor(ctx); cur != NULL; cur = ggml_get_next_tensor(ctx, cur)) {
+        const auto * weight = getWeight(ggml_get_name(cur));
         if (weight == nullptr) {
             // this can happen with split experts models
             continue;
         }
 
-        if (progress_callback) {
-            if (!progress_callback((float) size_done / size_data, progress_callback_user_data)) {
-                return false;
-            }
-        }
+        //if (progress_callback) {
+        //    if (!progress_callback((float) size_done / size_data, progress_callback_user_data)) {
+        //        return false;
+        //    }
+        //}
 
-        size_t n_size = ggml_nbytes(cur);
+        size_t numBytes = ggml_nbytes(cur);
 
-        if (use_mmap) {
-            const auto & mapping = mappings.at(weight->idx);
-            ggml_backend_buffer_t buf_mmap = nullptr;
-            if (bufs_mmap.count(weight->idx)) {
-                buf_mmap = bufs_mmap.at(weight->idx);
+        if (mUseMmap) {
+            const auto & mmap = mMmaps.at(weight->idx);
+            ggml_backend_buffer_t mmapBuffer = nullptr;
+            if (bufferMap.count(weight->idx)) {
+                mmapBuffer = bufferMap.at(weight->idx);
             }
-            GGML_ASSERT(buf_mmap || cur->data); // either we have a buffer to allocate the tensor in, or it is already allocated
-            if (buf_mmap && cur->data == nullptr) {
-                ggml_backend_tensor_alloc(buf_mmap, cur, (uint8_t *) mapping->addr + weight->offs);
-                if (lmlocks) {
-                    const auto & lmlock = lmlocks->at(weight->idx);
-                    lmlock->grow_to(weight->offs + ggml_nbytes(cur));
+            assert(mmapBuffer || cur->data); // either we have a buffer to allocate the tensor in, or it is already allocated
+            if (mmapBuffer && cur->data == nullptr) {
+                ggml_backend_tensor_alloc(mmapBuffer, cur, (uint8_t *)mmap->addr + weight->offset);
+                if (memoryLocks) {
+                    const auto & lmlock = memoryLocks->at(weight->idx);
+                    lmlock->growTo(weight->offset + numBytes);
                 }
 
-                auto & mmap_used = mmaps_used[weight->idx];
-                mmap_used.first  = std::min(mmap_used.first,  weight->offs);
-                mmap_used.second = std::max(mmap_used.second, weight->offs + n_size);
+                auto & usedMmap = mUsedMmaps[weight->idx];
+                usedMmap.first  = std::min(usedMmap.first,  weight->offset);
+                usedMmap.second = std::max(usedMmap.second, weight->offset + numBytes);
             } else {
-                ggml_backend_tensor_set(cur, (uint8_t *) mapping->addr + weight->offs, 0, n_size);
+                ggml_backend_tensor_set(cur, (uint8_t *)mmap->addr + weight->offset, 0, numBytes);
             }
         } else {
-            GGML_ASSERT(weight->idx < files.size());
-            const auto & file = files.at(weight->idx);
+            assert(weight->idx < mFiles.size());
+            const auto & file = mFiles.at(weight->idx);
             if (ggml_backend_buffer_is_host(cur->buffer)) {
-                file->seek(weight->offs, SEEK_SET);
-                file->read_raw(cur->data, ggml_nbytes(cur));
+                file->seek(weight->offset, SEEK_SET);
+                file->readRaw(cur->data, numBytes);
             } else {
-                read_buf.resize(ggml_nbytes(cur));
-                file->seek(weight->offs, SEEK_SET);
-                file->read_raw(read_buf.data(), ggml_nbytes(cur));
-                ggml_backend_tensor_set(cur, read_buf.data(), 0, n_size);
+                readBuffer.resize(numBytes);
+                file->seek(weight->offset, SEEK_SET);
+                file->readRaw(readBuffer.data(), numBytes);
+                ggml_backend_tensor_set(cur, readBuffer.data(), 0, numBytes);
             }
         }
 
-        size_done += n_size;
+        spdlog::info("{}: model tensor {} with {:5.3f} MB are loaded",
+            LOG_HEAD, ggml_get_name(cur), float(numBytes) / 1024.0f / 1024.0f);
+
+        loadedBytes += numBytes;
     }
 
     // check if this is the last call and do final cleanup
-    if (size_done >= size_data) {
+    if (loadedBytes >= totalBytes) {
         // unmap offloaded tensors and metadata
-        if (use_mmap) {
-            for (uint32_t idx = 0; idx < mappings.size(); idx++) {
-                const auto & mmap_used = mmaps_used.at(idx);
-                auto & mapping = mappings.at(idx);
-                mapping->unmap_fragment(0, mmap_used.first);
-                if (mmap_used.second != 0) {
-                    mapping->unmap_fragment(mmap_used.second, mapping->size);
+        if (mUseMmap) {
+            for (uint32_t idx = 0; idx < mMmaps.size(); idx++) {
+                const auto & usedMmap = mUsedMmaps.at(idx);
+                auto & mmap = mMmaps.at(idx);
+                mmap->unmapRange(0, usedMmap.first);
+                if (usedMmap.second != 0) {
+                    mmap->unmapRange(usedMmap.second, mmap->size);
                 }
             }
         }
-        if (progress_callback) {
+        //if (progress_callback) {
             // Even though the model is done loading, we still honor
             // cancellation since we need to free allocations.
-            return progress_callback(1.0f, progress_callback_user_data);
-        }
+        //    return progress_callback(1.0f, progress_callback_user_data);
+        //}
+
+        spdlog::info("{}: the model data are all loaded with total size = {:5.3f}MB",
+            LOG_HEAD, float(loadedBytes) / 1024.0f / 1024.0f);
+
+    } else {
+        spdlog::error("{}: the loaded data is less than the required {} vs {} bytes",
+            LOG_HEAD, loadedBytes, totalBytes);
+        return false;
     }
 
     return true;
 }
 
-#endif
 
-Model::~Model()
+Model* loadModel(const char* file) noexcept 
 {
-    delete ml;
-}
-
-Model loadModel(const char* file) noexcept 
-{
-#if 0
+    /*
     unsigned curPercentage = 0;
     auto progress_callback_user_data = &curPercentage;
     auto progress_callback = [](float progress, void * ctx) {
@@ -353,22 +379,34 @@ Model loadModel(const char* file) noexcept
         }
         return true;
     };
-#endif
-
+    */
     const char* suffix = strrchr(file, '.');
     if (strncmp(suffix, ".gguf", 5) == 0) {
         ModelLoaderGguf* modelLoader = new ModelLoaderGguf();
         if (!modelLoader->load(std::string(file))) {
             spdlog::error("{}: failed to load model file {}", __func__, file);
             delete modelLoader;
-            return Model();
+            return nullptr;
         }
 
-        return Model(modelLoader);
+        auto* model = modelLoader->build();
+        delete modelLoader;
+        return model;
     } 
 
     spdlog::error("{}: unsupported model format {}", __func__, file);
-    return Model();
+    return nullptr;
+}
+
+
+bool supportGpuOffload(void) {
+#if defined(GGML_USE_CUDA) || defined(GGML_USE_CLBLAST) || defined(GGML_USE_METAL) || defined(GGML_USE_VULKAN) || \
+    defined(GGML_USE_SYCL) || defined(GGML_USE_KOMPUTE)
+    // Defined when llama.cpp is compiled with support for offloading model layers to GPU.
+    return true;
+#else
+    return false;
+#endif
 }
 
 M_END_NAMESPACE

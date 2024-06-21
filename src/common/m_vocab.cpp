@@ -137,7 +137,7 @@ bool Vocab::load(ModelLoader& ml) noexcept
 
     const uint32_t numVocab = gguf_get_arr_n(ctx, tokenIdx);
     idToToken.resize(numVocab);
-    spdlog::info("{}: vocabulary size {}.\n", LOG_HEAD, numVocab);
+    //spdlog::info("{}: vocabulary size {}.\n", LOG_HEAD, numVocab);
     for (uint32_t i = 0; i < numVocab; i++) {
         std::string word = gguf_get_arr_str(ctx, tokenIdx, i);
         assert(unicode_cpts_from_utf8(word).size() > 0);
@@ -307,10 +307,10 @@ bool Vocab::load(ModelLoader& ml) noexcept
                 specialTokensCountByType,
                 idToToken.size());
         } else {
-            spdlog::info("{}: special tokens definition check successful ( {}/{} ).\n",
-                LOG_HEAD,
-                specialTokensCountFromVerification, 
-                idToToken.size());
+            //spdlog::info("{}: special tokens definition check successful ( {}/{} ).\n",
+            //    LOG_HEAD,
+            //    specialTokensCountFromVerification, 
+            //    idToToken.size());
         }
     }
 

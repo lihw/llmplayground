@@ -9,8 +9,10 @@
 
 #include <common/m_defs.h>
 #include <common/m_gguf.h>
+#include <common/m_misc.h>
 
 #include <ggml/ggml.h>
+#include <ggml/ggml-backend.h>
 
 #include <fmt/core.h>
 
@@ -18,9 +20,9 @@
 #include <vector>
 #include <stdexcept>
 
-
 M_BEGIN_NAMESPACE
 
+class Model;
 
 class ModelLoader {
 
@@ -33,7 +35,7 @@ public:
     */
     struct Weight {
         uint16_t  idx; // source file index
-        size_t   offs; // tensor data offset in the original file
+        size_t   offset; // tensor data offset in the original file
 
         ggml_tensor * tensor;
 
@@ -42,9 +44,40 @@ public:
             , tensor(tensor) {
 
             const int tensor_idx = gguf_find_tensor(gguf_ctx, name);
-            offs = gguf_get_data_offset(gguf_ctx) + gguf_get_tensor_offset(gguf_ctx, tensor_idx);
+            offset = gguf_get_data_offset(gguf_ctx) + gguf_get_tensor_offset(gguf_ctx, tensor_idx);
         }
     };
+
+
+    struct Parameters {
+        int32_t numGpuLayers = 0; //! number of layers to store in VRAM
+        //enum llama_split_mode split_mode; // how to split the model across multiple GPUs
+
+        // main_gpu interpretation depends on split_mode:
+        // LLAMA_SPLIT_NONE: the GPU that is used for the entire model
+        // LLAMA_SPLIT_ROW: the GPU that is used for small tensors and intermediate results
+        // LLAMA_SPLIT_LAYER: ignored
+        int32_t mainGpu = -1;
+
+        // proportion of the model (layers or rows) to offload to each GPU, size: llama_max_devices()
+        //const float* tensor_split;
+
+        // Called with a progress value between 0.0 and 1.0. Pass NULL to disable.
+        // If the provided progress_callback returns true, model loading continues.
+        // If it returns false, model loading is immediately aborted.
+        //llama_progress_callback progress_callback;
+
+        // context pointer passed to the progress callback
+        //void* progress_callback_user_data;
+
+        // override key-value pairs of the model meta data
+        //const struct llama_model_kv_override* kv_overrides;
+
+        // Keep the booleans together to avoid misalignment during copy-by-value.
+        bool vocabOnly = false; // only load the vocabulary, no weights
+        bool useMmap = true;   // use mmap if possible
+        bool useMemoryLock = true;  // force system to keep model in RAM
+    } params;
 
 public:
     explicit ModelLoader();
@@ -53,10 +86,14 @@ public:
 
     virtual bool load(const std::string& file) noexcept = 0;
 
+    size_t getTensorCount() const noexcept
+    {
+        return mNumTensors;
+    }
     const char* getTensorName(int i) const noexcept;
-    Weight* getWeight(const char * name) noexcept;
-    ggml_tensor* getTensorMeta(const char* name) noexcept; 
-    ggml_tensor* getTensorMeta(int i) noexcept;
+    const Weight* getWeight(const char * name) const noexcept;
+    ggml_tensor* getTensorMeta(const char* name) const noexcept; 
+    ggml_tensor* getTensorMeta(int i) const noexcept;
     gguf_context* getContext() const noexcept 
     {
         return mMeta;
@@ -64,6 +101,11 @@ public:
     const std::string& getArchName() const noexcept
     {
         return mArchName;
+    }
+
+    const std::vector<std::unique_ptr<File>>& getFiles() const noexcept
+    {
+        return mFiles;
     }
 
     template<typename T>
@@ -84,15 +126,87 @@ public:
         return getKey(getKvString(kid, mArchName), result, required);
     }
 
-protected:
+
+    template<typename T>
+    typename std::enable_if<std::is_integral<T>::value, bool>::type
+    getArrayLength(const std::string & key, T & result, const bool required = true) {
+        const int kid = gguf_find_key(mMeta, key.c_str());
+
+        if (kid < 0) {
+            if (required) {
+                throw std::runtime_error(fmt::format("key not found in model: {}", key));
+            }
+            return false;
+        }
+
+        struct GGUFMeta::ArrayInfo arrInfo =
+            GGUFMeta::GKV<GGUFMeta::ArrayInfo>::get_kv(mMeta, kid);
+
+
+        result = T(arrInfo.length);
+        return true;
+    }
+
+    template<typename T>
+    typename std::enable_if<std::is_integral<T>::value, bool>::type
+    getArrayLength(const Kv kid, T & result, const bool required = true) {
+        return getArrayLength(getKvString(kid, mArchName), result, required);
+    }
+
+    /**
+     * Create a model object after a successful loading 
+    */
+    virtual Model* build() noexcept = 0;
+
+    /**
+     * 
+    */
+    ggml_tensor* createTensorFor(ggml_context *ctx, const ggml_tensor *cur);
+    /**
+     * 
+    */
+    const ggml_tensor* checkTensorDims(const std::string &name, const std::vector<int64_t> &ne, bool required) const;
+    /**
+     * 
+     * @param artificial True if this tensor doesn't appear in the model file.
+    */
+    ggml_tensor *createTensor(ggml_context *ctx,
+        const std::string &name,
+        const std::vector<int64_t> &ne,
+        bool required = true,
+        bool artificial = false);
+    /**
+     * 
+    */
+    ggml_tensor *createTensorAsView(struct ggml_context *ctx,
+        ggml_tensor *base,
+        const std::string &name,
+        const std::vector<int64_t> &ne,
+        size_t offset,
+        bool required = true);
+
+    bool loadData(
+        ggml_context* ctx,
+        std::unordered_map<uint32_t, ggml_backend_buffer_t>& bufferMap,
+        MemoryLocks* memoryLocks);
+
+    /**
+     * If all tensors in this model have been created
+    */
+    bool areAllTensorsCreated() const;
+
+    void initializeMappings(bool prefetch = true, MemoryLocks *memoryLocks = nullptr);
+
+  protected:
     size_t mNumKeyValues;
     size_t mNumTensors;
     size_t mNumElements;
     size_t mNumBytes;
 
-    //bool mUseMmap = false;
-    //llama_files files;
-    //llama_mmaps mappings;
+    bool mUseMmap = false;
+    std::vector<std::unique_ptr<File>> mFiles;
+    Mmaps mMmaps;
+    std::vector<std::pair<size_t, size_t>> mUsedMmaps;
     //std::unordered_map<std::string, struct llama_model_kv_override> kv_overrides;
     
     std::vector<Weight>           mWeights;
@@ -100,27 +214,13 @@ protected:
     std::vector<ggml_context*>    mContexts;
     
     std::string mArchName; //! The model arch
-    //LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
+
+    uint32_t mNumCreated = 0; //! The number of created tensors
 };
 
-// FIXME: move model related data from ModelLoader to Model
-class Model {
-public:
-    ModelLoader* ml = nullptr;
-    
-    Model(ModelLoader* ml = nullptr) {
-        this->ml = ml;
-    }
+extern bool supportGpuOffload(void);
 
-    ~Model();
-
-    bool isValid() const 
-    {
-        return ml != nullptr;
-    }
-};
-
-extern Model loadModel(const char* file) noexcept;
+extern Model* loadModel(const char* file) noexcept;
 
 M_END_NAMESPACE
 
