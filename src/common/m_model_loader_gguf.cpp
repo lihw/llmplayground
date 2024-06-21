@@ -348,19 +348,6 @@ Model* ModelLoaderGguf::build() noexcept
     }
     spdlog::info("{}: model tensors loaded", LOG_HEAD);
 
-    /*
-    (
-            ml, model, params.n_gpu_layers, params.split_mode,  params.main_gpu, params.tensor_split, params.use_mlock,
-            params.progress_callback, params.progress_callback_user_data
-        )) {
-            return nullptr;
-        }
-    } catch (const std::exception & err) {
-        spdlog::error("{}: error loading model: {}\n", LOG_HEAD, err.what());
-        return nullptr;
-    }
-    */
-
     return model;
 }
 

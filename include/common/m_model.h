@@ -69,8 +69,7 @@ public:
         uint32_t attentionHeadCountKv;
         uint32_t layerCount;//! The layer count
         // uint32_t n_rot;
-        uint32_t
-            attentionKeyLength;// dimension of keys (d_k). d_q is assumed to be the same, but there are n_head q heads,
+        uint32_t attentionKeyLength;// dimension of keys (d_k). d_q is assumed to be the same, but there are n_head q heads,
         //                        // and only n_head_kv k-v heads
         uint32_t attentionValueLength;// dimension of values (d_v) aka n_embd_head
         uint32_t feedForwardLength;
@@ -95,7 +94,7 @@ public:
         // float f_max_alibi_bias = 0.0f;
         // float f_logit_scale = 0.0f;
 
-        // bool causal_attn = true;
+        bool causal_attn = true;  // FIXME: what does it mean?
         // bool need_kq_pos = false;
 
         // enum llama_pooling_type pooling_type = LLAMA_POOLING_TYPE_NONE;

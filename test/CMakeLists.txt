@@ -147,3 +147,36 @@ target_include_directories(tokenizer_tests ${WARNING_GUARD} PUBLIC $<BUILD_INTER
                                                                   $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
                                                                   "${CMAKE_BINARY_DIR}/configured_files/include"
                                                                   )
+#
+add_executable(inference_tests inference_tests.cpp)
+target_link_libraries(
+  inference_tests
+  PRIVATE myproject::myproject_warnings
+          myproject::myproject_options
+          tokenizer
+          inference
+          common
+          ggml
+          spdlog
+          fmt
+          Catch2::Catch2WithMain)
+target_compile_definitions(inference_tests PRIVATE -DCATCH_CONFIG_RUNTIME_STATIC_REQUIRE)
+
+catch_discover_tests(
+  inference_tests
+  TEST_PREFIX
+  "inference."
+  REPORTER
+  XML
+  OUTPUT_DIR
+  .
+  OUTPUT_PREFIX
+  "inference."
+  OUTPUT_SUFFIX
+  .xml)
+set_target_properties (inference_tests PROPERTIES FOLDER tests)
+
+target_include_directories(inference_tests ${WARNING_GUARD} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+                                                                  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+                                                                  "${CMAKE_BINARY_DIR}/configured_files/include"
+                                                                  )

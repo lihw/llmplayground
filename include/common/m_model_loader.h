@@ -80,7 +80,7 @@ public:
     } params;
 
 public:
-    explicit ModelLoader();
+    friend Model* loadModel(const char* file, const ModelLoader::Parameters& parameters) noexcept;
 
     virtual ~ModelLoader();
 
@@ -197,7 +197,11 @@ public:
 
     void initializeMappings(bool prefetch = true, MemoryLocks *memoryLocks = nullptr);
 
-  protected:
+    static bool supportGpuOffload(void);
+
+protected:
+    explicit ModelLoader();
+
     size_t mNumKeyValues;
     size_t mNumTensors;
     size_t mNumElements;
@@ -218,9 +222,8 @@ public:
     uint32_t mNumCreated = 0; //! The number of created tensors
 };
 
-extern bool supportGpuOffload(void);
 
-extern Model* loadModel(const char* file) noexcept;
+extern Model* loadModel(const char* file, const ModelLoader::Parameters& parameters) noexcept;
 
 M_END_NAMESPACE
 

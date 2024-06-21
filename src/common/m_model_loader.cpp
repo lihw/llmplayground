@@ -362,7 +362,7 @@ bool ModelLoader::loadData(
 }
 
 
-Model* loadModel(const char* file) noexcept 
+Model* loadModel(const char* file, const ModelLoader::Parameters& parameters) noexcept 
 {
     /*
     unsigned curPercentage = 0;
@@ -383,6 +383,10 @@ Model* loadModel(const char* file) noexcept
     const char* suffix = strrchr(file, '.');
     if (strncmp(suffix, ".gguf", 5) == 0) {
         ModelLoaderGguf* modelLoader = new ModelLoaderGguf();
+
+        modelLoader->params = parameters;
+        // TODO: validate the parameters
+
         if (!modelLoader->load(std::string(file))) {
             spdlog::error("{}: failed to load model file {}", __func__, file);
             delete modelLoader;
@@ -399,7 +403,8 @@ Model* loadModel(const char* file) noexcept
 }
 
 
-bool supportGpuOffload(void) {
+bool ModelLoader::supportGpuOffload(void) 
+{
 #if defined(GGML_USE_CUDA) || defined(GGML_USE_CLBLAST) || defined(GGML_USE_METAL) || defined(GGML_USE_VULKAN) || \
     defined(GGML_USE_SYCL) || defined(GGML_USE_KOMPUTE)
     // Defined when llama.cpp is compiled with support for offloading model layers to GPU.

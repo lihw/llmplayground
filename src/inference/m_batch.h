@@ -10,6 +10,10 @@
 #include <common/m_defs.h>
 #include <common/m_token.h>
 
+#include <vector>
+
+#include <stdint.h>
+
 M_BEGIN_NAMESPACE
 
 typedef int32_t Pos;
@@ -19,9 +23,13 @@ typedef int32_t SeqId;
 // A Batch object can contain input about one or many sequences
 // The provided arrays (i.e. token, embd, pos, etc.) must have size of n_tokens
 //
-struct Batch {
+class Batch {
+    M_NO_COPY_CONSTRUCTOR(Batch);
+    M_NO_MOVE_CONSTRUCTOR(Batch);
+
+public:
     //! the token ids of the input (used when embd is NULL)
-    std::vector<Token>                       tokens;
+    std::vector<TokenId>                     tokens;
     //! token embeddings (i.e. float vector of size n_embd) (used when token is NULL)
     std::vector<float>                       embeds;
     //! the positions of the respective token in the sequence
@@ -40,9 +48,24 @@ struct Batch {
     //llama_seq_id all_seq_id; // used if seq_id == NULL
     //
 
-    void add(TokenId tokenId, PosEncoding pos, const std::vector<SeqId>& seqIds, 
-        bool logits) noexcept;
+    size_t numTokens;
+
+public:
+    friend Batch* createBatch(int32_t numTokens, int32_t embedLength, int32_t maxNumSeq);
+
+    ~Batch() noexcept;
+
+    void add(TokenId tokenId, Pos pos, const std::vector<SeqId>& seqIds, bool logits) noexcept;
+
+private:
+    explicit Batch();
 };
+
+/**
+ * @param numTokens the batch size in number of tokens.
+ * @param embedLength the dim of embedings. If it is not 0, use embedings instead of tokens (skip the tokenization)
+ */
+extern Batch* createBatch(int32_t numTokens, int32_t embedLength, int32_t maxNumSeq);
 
 M_END_NAMESPACE
 

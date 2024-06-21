@@ -1,4 +1,4 @@
-set(TARGET common)
+set(TARGET inference)
 
 file(
     GLOB_RECURSE _source_list
