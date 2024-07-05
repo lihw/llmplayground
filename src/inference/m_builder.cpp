@@ -330,7 +330,7 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
     // C: the vocab size/number of tokens
 
     // inputEmbed: [B x T] F32
-    // model->mTensors.token_embed: [C x T] F32
+    // model->mTensors.token_embed: [C x T] F32, i.e, [32000 x 4096] in llama 7b
     inputEmbed = buildInputEmbed(context, hparams, batch, model->mTensors.token_embed, cb);
 
     // inputPositions - contains the positions: [B x 1] I32
@@ -344,8 +344,7 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
         struct ggml_tensor* inputSA = inputLayer;
 
         // -> cur: [B x T]
-        //    model->mLayer.attn_norm: [1 x T]
-        //    model->mLayer.attn_norm_b: [1 x T] ???
+        //    model->mLayer.attn_norm: [1 x T] F32, i.e., [1 x 4096] in llama 7b
         // <- cur: [B x T]
         cur = buildNorm(ctx, inputEmbed, hparams, model->mLayers[il].attn_norm, nullptr, NormType::NORM_RMS, cb, il);
         cb(cur, "attn_norm", il);
@@ -353,9 +352,9 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
         // self-attention
         {
             // compute Q and K and RoPE them
+
             // -> cur: [B x T] (ggml takes in the transposed input, A x B^T = C^T
-            //    model->wq: [T x T]
-            //    model->bq: [1 x T] ???
+            //    model->wq: [T x T], i.e, [4096 x 4096] in llama 7b
             // <- Qcur: [T x B] (ggml transposes the outputs)
             ggml_tensor* Qcur = ggml_mul_mat(ctx, model->mLayers[il].wq, cur);
             cb(Qcur, "Qcur", il);
@@ -364,6 +363,9 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
                 cb(Qcur, "Qcur", il);
             }
 
+            // -> cur: [B x T] (ggml takes in the transposed input, A x B^T = C^T
+            //    model->wk: [T x T], i.e, [4096 x 4096] in llama 7b
+            // <- Kcur: [T x B] (ggml transposes the outputs)
             ggml_tensor* Kcur = ggml_mul_mat(ctx, model->mLayers[il].wk, cur);
             cb(Kcur, "Kcur", il);
             if (model->mLayers[il].bk) {
@@ -371,6 +373,9 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
                 cb(Kcur, "Kcur", il);
             }
 
+            // -> cur: [B x T] (ggml takes in the transposed input, A x B^T = C^T
+            //    model->wk: [T x T], i.e, [4096 x 4096] in llama 7b
+            // <- Vcur: [T x B] (ggml transposes the outputs)
             struct ggml_tensor* Vcur = ggml_mul_mat(ctx, model->mLayers[il].wv, cur);
             cb(Vcur, "Vcur", il);
             if (model->mLayers[il].bv) {
