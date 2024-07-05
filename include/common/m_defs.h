@@ -248,6 +248,14 @@ enum class PoolingType {
     CLS = 2,
 };
 
+enum class NormType {
+    NORM,
+    NORM_RMS,
+};
+
+enum { MAX_NODES = 8192 };
+enum { MAX_EXPERTS = 8 };
+
 extern Arch getArchFromString(const std::string& name) noexcept;
 
 extern std::string getKvString(Kv kv, Arch arch) noexcept;

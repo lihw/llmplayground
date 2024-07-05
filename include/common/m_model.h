@@ -77,8 +77,8 @@ public:
         uint32_t expertUsedCount = 0;
         uint32_t vocabTypeCount = 0;// for BERT-style token types
 
-        // float f_norm_eps;
-        // float f_norm_rms_eps;
+        float normEps;
+        float normRmsEps;
 
         // float rope_freq_base_train;
         // float rope_freq_scale_train;
@@ -236,6 +236,7 @@ private:
         struct ggml_tensor *ffn_act;
 
         // mamba proj
+#if 0
         struct ggml_tensor *ssm_in;
         struct ggml_tensor *ssm_x;
         struct ggml_tensor *ssm_dt;
@@ -249,13 +250,18 @@ private:
         // mamba bias
         struct ggml_tensor *ssm_conv1d_b;
         struct ggml_tensor *ssm_dt_b;
+#endif
     };
     std::vector<Layer> mLayers;
 
     int64_t mLoadUs = 0;//! when to load the model
     int64_t mStartUs = 0;//! when to load the tensors
-
 };
+
+
+extern ggml_backend_buffer_type_t getDefaultBufferTypeCpu(bool host_buffer);
+
+extern size_t getDeviceCount();
 
 M_END_NAMESPACE
 

@@ -46,8 +46,8 @@ Context* createContext(Model* model, const infer::Context::Parameters& parameter
         return nullptr;
     }
 
-    if (parameters.contextSize == 0 && model->hparams.contextSize == 0) {
-        spdlog::error("{}: contextSize and model->hparams.contextSize cannot both be zero", LOG_HEAD);
+    if (parameters.contextSize == 0 && model->params.contextLength == 0) {
+        spdlog::error("{}: contextSize and model->params.contextLength cannot both be zero", LOG_HEAD);
         return nullptr;
     }
 
@@ -60,7 +60,7 @@ Context* createContext(Model* model, const infer::Context::Parameters& parameter
     const auto & hparams = model->params;
     auto       & cparams = ctx->params;
 
-    cparams.maxNumSeqs         = std::max(1u, params.maxNumSeqs);
+    cparams.maxNumSeqs         = std::max(1u, uint32_t(parameters.maxNumSeqs));
     cparams.numThreads         = parameters.numThreads;
     cparams.numThreadsBatch    = parameters.numThreadsBatch;
     //cparams.yarn_ext_factor  = parameters.yarn_ext_factor;
@@ -72,7 +72,7 @@ Context* createContext(Model* model, const infer::Context::Parameters& parameter
     //cparams.offload_kqv      = parameters.offload_kqv;
     cparams.poolingType        = parameters.poolingType;
 
-    cparams.contextSize        = parameters.contextSize == 0    ? hparams.n_ctx_train           : params.contextSize;
+    cparams.contextSize        = parameters.contextSize == 0    ? hparams.contextLength           : parameters.contextSize;
     //cparams.rope_freq_base     = params.rope_freq_base  == 0.0f ? hparams.rope_freq_base_train  : params.rope_freq_base;
     //cparams.rope_freq_scale    = params.rope_freq_scale == 0.0f ? hparams.rope_freq_scale_train : params.rope_freq_scale;
 
@@ -80,8 +80,8 @@ Context* createContext(Model* model, const infer::Context::Parameters& parameter
     cparams.contextSize = GGML_PAD(cparams.contextSize, 32);
 
     // with causal attention, the batch size is limited by the context size
-    cparams.batchSize     = hparams.causal_attn ? std::min(cparams.n_ctx, params.n_batch) : params.n_batch;
-    cparams.unitBatchSize = std::min(cparams.n_batch, params.n_ubatch == 0 ? params.n_batch : params.n_ubatch);
+    cparams.batchSize     = hparams.causal_attn ? std::min(cparams.contextSize, parameters.batchSize) : parameters.batchSize;
+    cparams.unitBatchSize = std::min(cparams.batchSize, parameters.unitBatchSize == 0 ? parameters.batchSize : parameters.unitBatchSize);
 
 
     //cparams.n_yarn_orig_ctx  = params.yarn_orig_ctx    != 0 ? params.yarn_orig_ctx    :
@@ -104,8 +104,6 @@ Context* createContext(Model* model, const infer::Context::Parameters& parameter
     //    cparams.yarn_ext_factor = rope_scaling_type == LLAMA_ROPE_SCALING_TYPE_YARN ? 1.0f : 0.0f;
     //}
 
-    cparams.causal_attn = hparams.causal_attn;
-
     if (cparams.poolingType == PoolingType::UNSPECIFIED) {
         if (hparams.poolingType == PoolingType::UNSPECIFIED) {
             cparams.poolingType = PoolingType::NONE;
@@ -114,144 +112,142 @@ Context* createContext(Model* model, const infer::Context::Parameters& parameter
         }
     }
 
-    if (params.seed == LLAMA_DEFAULT_SEED) {
-        params.seed = time(NULL);
-    }
+    cparams.seed = time(NULL);
 
-    LLAMA_LOG_INFO("%s: n_ctx      = %u\n",     __func__, cparams.n_ctx);
-    LLAMA_LOG_INFO("%s: n_batch    = %u\n",     __func__, cparams.n_batch);
-    LLAMA_LOG_INFO("%s: n_ubatch   = %u\n",     __func__, cparams.n_ubatch);
-    LLAMA_LOG_INFO("%s: freq_base  = %.1f\n",   __func__, cparams.rope_freq_base);
-    LLAMA_LOG_INFO("%s: freq_scale = %g\n",     __func__, cparams.rope_freq_scale);
+    spdlog::info("{}: n_ctx      = {}",     LOG_HEAD, cparams.contextSize);
+    spdlog::info("{}: n_batch    = {}",     LOG_HEAD, cparams.batchSize);
+    spdlog::info("{}: n_ubatch   = {}",     LOG_HEAD, cparams.unitBatchSize);
+    //spdlog::info("{}: freq_base  = %.1f\n",   LOG_HEAD, cparams.rope_freq_base);
+    //spdlog::info("{}: freq_scale = %g\n",     LOG_HEAD, cparams.rope_freq_scale);
 
     //ctx->abort_callback      = params.abort_callback;
     //ctx->abort_callback_data = params.abort_callback_data;
 
-    ctx->rng                 = std::mt19937(params.seed);
-    ctx->logits_all          = params.logits_all;
+    //ctx->rng                 = std::mt19937(params.seed);
+    //ctx->logits_all          = params.logits_all;
 
-    uint32_t kv_size = cparams.n_ctx;
-    ggml_type type_k = params.type_k;
-    ggml_type type_v = params.type_v;
+    uint32_t kv_size = cparams.contextSize;
+    ggml_type typeK = parameters.typeK;
+    ggml_type typeV = parameters.typeV;
 
     // Mamba only needs a constant number of KV cache cells per sequence
-    if (model->arch == LLM_ARCH_MAMBA) {
-        // Mamba needs at least as many KV cells as there are sequences kept at any time
-        kv_size = std::max((uint32_t) 1, params.n_seq_max);
-        // it's probably best to keep as much precision as possible for the states
-        type_k = GGML_TYPE_F32; // required by ggml_ssm_conv for Mamba's conv_states
-        type_v = GGML_TYPE_F32; // required by ggml_ssm_scan for Mamba's ssm_states
-    }
+    //if (model->arch == LLM_ARCH_MAMBA) {
+    //    // Mamba needs at least as many KV cells as there are sequences kept at any time
+    //    kv_size = std::max((uint32_t) 1, params.n_seq_max);
+    //    // it's probably best to keep as much precision as possible for the states
+    //    type_k = GGML_TYPE_F32; // required by ggml_ssm_conv for Mamba's conv_states
+    //    type_v = GGML_TYPE_F32; // required by ggml_ssm_scan for Mamba's ssm_states
+    //}
 
-    assert(hparams.n_embd_head_k % ggml_blck_size(type_k) == 0);
-    assert(hparams.n_embd_head_v % ggml_blck_size(type_v) == 0);
+    //assert(hparams.n_embd_head_k % ggml_blck_size(type_k) == 0);
+    //assert(hparams.n_embd_head_v % ggml_blck_size(type_v) == 0);
 
     if (!hparams.vocabOnly) {
         // initialize backends
-        ctx->backend_cpu = ggml_backend_cpu_init();
-        if (ctx->backend_cpu == nullptr) {
-            LLAMA_LOG_ERROR("%s: failed to initialize CPU backend\n", __func__);
-            llama_free(ctx);
+        ctx->mBackendCpu = ggml_backend_cpu_init();
+        if (ctx->mBackendCpu == nullptr) {
+            spdlog::error("{}: failed to initialize CPU backend", LOG_HEAD);
+            delete ctx;
             return nullptr;
         }
-        ctx->backends.push_back(ctx->backend_cpu);
+        ctx->mBackends.push_back(ctx->mBackendCpu);
 
-        if (!llama_kv_cache_init(ctx->kv_self, ctx->model, type_k, type_v, kv_size, cparams.offload_kqv)) {
-            LLAMA_LOG_ERROR("%s: llama_kv_cache_init() failed for self-attention cache\n", __func__);
-            llama_free(ctx);
-            return nullptr;
-        }
+        //if (!ctx->initializeKvCache(ctx->kv_self, ctx->model, typeK, typeV, kv_size, cparams.offload_kqv)) {
+        //    spdlog::error("{}: llama_kv_cache_init() failed for self-attention cache", LOG_HEAD);
+        //    delete ctx;
+        //    return nullptr;
+        //}
 
-        {
-            size_t memory_size_k = 0;
-            size_t memory_size_v = 0;
+        //{
+        //    size_t memory_size_k = 0;
+        //    size_t memory_size_v = 0;
 
-            for (auto & k : ctx->kv_self.k_l) {
-                memory_size_k += ggml_nbytes(k);
-            }
+        //    for (auto & k : ctx->kv_self.k_l) {
+        //        memory_size_k += ggml_nbytes(k);
+        //    }
 
-            for (auto & v : ctx->kv_self.v_l) {
-                memory_size_v += ggml_nbytes(v);
-            }
+        //    for (auto & v : ctx->kv_self.v_l) {
+        //        memory_size_v += ggml_nbytes(v);
+        //    }
 
-            LLAMA_LOG_INFO("%s: KV self size  = %7.2f MiB, K (%s): %7.2f MiB, V (%s): %7.2f MiB\n", __func__,
-                    (float)(memory_size_k + memory_size_v) / (1024.0f * 1024.0f),
-                    ggml_type_name(type_k), (float)memory_size_k / (1024.0f * 1024.0f),
-                    ggml_type_name(type_v), (float)memory_size_v / (1024.0f * 1024.0f));
-        }
+        //    spdlog::info("%s: KV self size  = %7.2f MiB, K (%s): %7.2f MiB, V (%s): %7.2f MiB\n", __func__,
+        //            (float)(memory_size_k + memory_size_v) / (1024.0f * 1024.0f),
+        //            ggml_type_name(type_k), (float)memory_size_k / (1024.0f * 1024.0f),
+        //            ggml_type_name(type_v), (float)memory_size_v / (1024.0f * 1024.0f));
+        //}
 
         // graph outputs buffer
         {
             // resized during inference when a batch uses more outputs
-            if (llama_output_reserve(*ctx, params.n_seq_max) < params.n_seq_max) {
-                LLAMA_LOG_ERROR("%s: failed to reserve initial output buffer\n", __func__);
-                llama_free(ctx);
+            if (ctx->reserveOutputs(parameters.maxNumSeqs) < parameters.maxNumSeqs) {
+                spdlog::error("{}: failed to reserve initial output buffer", LOG_HEAD);
+                delete ctx;
                 return nullptr;
             }
 
-            LLAMA_LOG_INFO("%s: %10s  output buffer size = %8.2f MiB\n", __func__,
-                    ggml_backend_buffer_name(ctx->buf_output),
-                    ggml_backend_buffer_get_size(ctx->buf_output) / 1024.0 / 1024.0);
+            spdlog::info("{}: {:10s}  output buffer size = {:8.2f} MiB\n", LOG_HEAD,
+                    ggml_backend_buffer_name(ctx->mOutputBuffer),
+                    ggml_backend_buffer_get_size(ctx->mOutputBuffer) / 1024.0 / 1024.0);
         }
 
         // scheduler and compute buffers
         {
             // buffer types used for the compute buffer of each backend
-            std::vector<ggml_backend_buffer_type_t> backend_buft;
-            for (auto * backend : ctx->backends) {
+            std::vector<ggml_backend_buffer_type_t> backendBufferTypes;
+            for (auto * backend : ctx->mBackends) {
                 if (ggml_backend_is_cpu(backend)) {
                     // use host buffers for the CPU backend compute buffer
-                    backend_buft.push_back(llama_default_buffer_type_cpu(true));
+                    backendBufferTypes.push_back(getDefaultBufferTypeCpu(true));
                 } else {
-                    backend_buft.push_back(ggml_backend_get_default_buffer_type(backend));
+                    backendBufferTypes.push_back(ggml_backend_get_default_buffer_type(backend));
                 }
             }
 
             // buffer used to store the computation graph and the tensor meta data
-            ctx->buf_compute_meta.resize(ggml_tensor_overhead()*LLAMA_MAX_NODES + ggml_graph_overhead_custom(LLAMA_MAX_NODES, false));
+            ctx->mBufferComputeMeta.resize(ggml_tensor_overhead() * MAX_NODES + ggml_graph_overhead_custom(MAX_NODES, false));
 
             // enabling pipeline parallelism in the scheduler increases memory usage, so it is only done when necessary
-            bool pipeline_parallel = llama_get_device_count() > 1 && model->n_gpu_layers > (int)model->hparams.n_layer && model->split_mode == LLAMA_SPLIT_MODE_LAYER;
+            bool pipelineParallel = false;
         
-            ctx->sched = ggml_backend_sched_new(ctx->backends.data(), backend_buft.data(), ctx->backends.size(), LLAMA_MAX_NODES, pipeline_parallel);
+            ctx->mSched = ggml_backend_sched_new(ctx->mBackends.data(), backendBufferTypes.data(), ctx->mBackends.size(), MAX_NODES, pipelineParallel);
 
-            if (pipeline_parallel) {
-                LLAMA_LOG_INFO("%s: pipeline parallelism enabled (n_copies=%d)\n", __func__, ggml_backend_sched_get_n_copies(ctx->sched));
+            if (pipelineParallel) {
+                spdlog::info("{}: pipeline parallelism enabled (n_copies={})\n", LOG_HEAD, ggml_backend_sched_get_n_copies(ctx->mSched));
             }
 
             // build worst-case graph
-            int n_tokens = (int)std::min(cparams.n_ctx, cparams.n_ubatch);
-            int n_past = cparams.n_ctx - n_tokens;
-            llama_token token = llama_token_bos(&ctx->model); // not actually used by llama_build_graph, but required to choose between token and embedding inputs graph
-            ggml_cgraph * gf = llama_build_graph(*ctx, llama_batch_get_one(&token, n_tokens, n_past, 0), true);
+            int numTokens = (int)std::min(cparams.contextSize, cparams.unitBatchSize);
+            int n_past = cparams.contextSize - numTokens;
+            TokenId token = ctx->mModel->vocab.specialBosId; // not actually used by llama_build_graph, but required to choose between token and embedding inputs graph
+            ggml_cgraph * gf = llama_build_graph(*ctx, llama_batch_get_one(&token, numTokens, n_past, 0), true);
 
             // initialize scheduler with the worst-case graph
-            if (!ggml_backend_sched_reserve(ctx->sched, gf)) {
-                LLAMA_LOG_ERROR("%s: failed to allocate compute buffers\n", __func__);
-                llama_free(ctx);
+            if (!ggml_backend_sched_reserve(ctx->mSched, gf)) {
+                spdlog::error("{}: failed to allocate compute buffers\n", LOG_HEAD);
+                delete ctx;
                 return nullptr;
             }
 
-            for (size_t i = 0; i < ctx->backends.size(); i++) {
-                ggml_backend_t backend = ctx->backends[i];
-                ggml_backend_buffer_type_t buft = backend_buft[i];
-                size_t size = ggml_backend_sched_get_buffer_size(ctx->sched, backend);
+            for (size_t i = 0; i < ctx->mBackends.size(); i++) {
+                ggml_backend_t backend = ctx->mBackends[i];
+                ggml_backend_buffer_type_t buft = backendBufferTypes[i];
+                size_t size = ggml_backend_sched_get_buffer_size(ctx->mSched, backend);
                 if (size > 1) {
-                    LLAMA_LOG_INFO("%s: %10s compute buffer size = %8.2f MiB\n", __func__,
+                    spdlog::info("{}: {:10s} compute buffer size = {:8.2f} MiB\n", LOG_HEAD,
                             ggml_backend_buft_name(buft),
                             size / 1024.0 / 1024.0);
                 }
             }
 
             // note: the number of splits during measure is higher than during inference due to the kv shift
-            int n_splits = ggml_backend_sched_get_n_splits(ctx->sched);
-            LLAMA_LOG_INFO("%s: graph nodes  = %d\n", __func__, gf->n_nodes);
-            LLAMA_LOG_INFO("%s: graph splits = %d\n", __func__, n_splits);
+            int n_splits = ggml_backend_sched_get_n_splits(ctx->mSched);
+            spdlog::info("{}: graph nodes  = {}\n", LOG_HEAD, gf->n_nodes);
+            spdlog::info("{}: graph splits = {}\n", LOG_HEAD, n_splits);
         }
     }
 
 
-    return ret;
+    return ctx;
 }
 
 int32_t Context::decode(Batch* batch)
@@ -582,7 +578,7 @@ int32_t Inference::decode(Session& session, Batch& batch)
             embd = nullptr; // do not extract embeddings when not needed
             GGML_ASSERT(strcmp(res->name, "result_output") == 0 && "missing result_output tensor");
         }
-        // LLAMA_LOG_INFO("graph build time: %.3f ms (%d nodes, %d leafs)\n", (ggml_time_us() - t_start_us)/1000.0, gf->n_nodes, gf->n_leafs);
+        // spdlog::info("graph build time: %.3f ms (%d nodes, %d leafs)\n", (ggml_time_us() - t_start_us)/1000.0, gf->n_nodes, gf->n_leafs);
 
         // for big prompts, if BLAS is enabled, it is better to use only one thread
         // otherwise, the threads are spin-lock waiting for the BLAS calls and are degrading the performance
@@ -698,7 +694,7 @@ int32_t Inference::decode(Session& session, Batch& batch)
 
         // queue defragmentation for next llama_kv_cache_update
         if (fragmentation > cparams.defrag_thold) {
-            //LLAMA_LOG_INFO("fragmentation: %.2f\n", fragmentation);
+            //spdlog::info("fragmentation: %.2f\n", fragmentation);
 
             llama_kv_cache_defrag(kv_self);
         }

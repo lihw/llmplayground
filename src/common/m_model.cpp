@@ -203,7 +203,7 @@ bool Model::loadParameters(ModelLoader& ml)
 
     // arch-specific KVs
     if (arch == Arch::LLAMA) {
-        // getKey(Kv::ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
+        getKey(Kv::ATTENTION_LAYERNORM_RMS_EPS, params.normRmsEps);
 
         if (params.expertCount == 8) {
             switch (params.layerCount) {
@@ -256,7 +256,7 @@ bool Model::loadVocab(ModelLoader& ml)
     return vocab.load(ml);
 }
 
-static ggml_backend_buffer_type_t getDefaultBufferTypeCpu(bool host_buffer) {
+ggml_backend_buffer_type_t getDefaultBufferTypeCpu(bool host_buffer) {
     ggml_backend_buffer_type_t buft = nullptr;
 
 #if defined(GGML_USE_CUDA)
@@ -283,6 +283,43 @@ static ggml_backend_buffer_type_t getDefaultBufferTypeCpu(bool host_buffer) {
 
     GGML_UNUSED(host_buffer);
 }
+
+size_t getDeviceCount() {
+#if defined(GGML_USE_CUDA)
+    return ggml_backend_cuda_get_device_count();
+#elif defined(GGML_USE_SYCL)
+    return ggml_backend_sycl_get_device_count();
+#elif defined(GGML_USE_VULKAN)
+    return ggml_backend_vk_get_device_count();
+#else
+    return 1;
+#endif
+}
+
+#if 0
+static size_t llama_get_device_memory(int device) {
+#if defined(GGML_USE_CUDA)
+    size_t total;
+    size_t free;
+    ggml_backend_cuda_get_device_memory(device, &total, &free);
+    return free;
+#elif defined(GGML_USE_SYCL)
+    size_t total;
+    size_t free;
+    ggml_backend_sycl_get_device_memory(device, &total, &free);
+    return free;
+#elif defined(GGML_USE_VULKAN)
+    size_t total;
+    size_t free;
+    ggml_backend_vk_get_device_memory(device, &total, &free);
+    return free;
+#else
+    return 1;
+    GGML_UNUSED(device);
+#endif
+}
+
+#endif
 
 #if 0
 static ggml_backend_buffer_type_t getDefaultBufferTypeOffload(int gpu) 

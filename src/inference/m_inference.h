@@ -36,6 +36,10 @@ public:
         size_t maxNumSeqs = 1;
 
         PoolingType poolingType = PoolingType::UNSPECIFIED;
+
+        ggml_type typeK = GGML_TYPE_F16;
+        ggml_type typeV = GGML_TYPE_F16;
+
 #if 0
         
         /*.rope_scaling_type           =*/ LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED,
@@ -50,8 +54,6 @@ public:
         /*.defrag_thold                =*/ -1.0f,
         /*.cb_eval                     =*/ nullptr,
         /*.cb_eval_user_data           =*/ nullptr,
-        /*.type_k                      =*/ GGML_TYPE_F16,
-        /*.type_v                      =*/ GGML_TYPE_F16,
         /*.logits_all                  =*/ false,
         /*.embeddings                  =*/ false,
         /*.offload_kqv                 =*/ true,
@@ -67,7 +69,6 @@ public:
      */
     int32_t decode(Batch* batch);
 
-
 private:
     /**
      */
@@ -75,10 +76,68 @@ private:
 
     // Make sure enough space is available for outputs.
     // Returns max number of outputs for which space was reserved.
-    size_t reserveOutputs(uint32_t numOutputs);
+    size_t _reserveOutputs(uint32_t numOutputs);
+
+    ggml_cgraph* _buildGraph(const Batch& batch, bool worstCase);
+
+
+    using BuildCallback = std::function<void(struct ggml_tensor * cur, const char * name, int nl)>;
+
+    struct Builder {
+        explicit Builder();
+
+        ~Builder();
+
+        ggml_cgraph* buildLlama(const Batch& batch, bool worseCase, const BuildCallback& cb);
+
+        ggml_tensor* buildInputEmbed(Context* context, const Model::Parameters& hparams, const Batch& batch,
+                ggml_tensor* tokenEmbed, const BuildCallback& cb);
+
+        ggml_tensor* buildNorm(Context* context, ggml_tensor * cur, const Model::Parameters& hparams, 
+                ggml_tensor* mw, ggml_tensor* mb, NormType type, const BuildCallback& cb, int il);
+
+        ggml_tensor* buildInputPosition(Context* context, const Batch& batch, const BuildCallback& cb);
+
+        ggml_tensor* buildInputKQMask(Context* context, const Batch& batch, bool causal = true);
+
+        //
+        //
+        //
+
+        ggml_context* ctx;
+
+        uint32_t numKvEntries;
+    };
+
+    struct KvCache {
+        explicit KvCache(ggml_type kType, ggml_type vType, uint32_t kvSize);
+
+        ~KvCache();
+
+        std::vector<ggml_context*> mContexts;
+
+        size_t mHead;
+        size_t mSize;
+        bool   mHasShift;
+        bool   mRecurrent;
+        bool   mUsed;
+
+        ggml_type mKType;
+        ggml_type mVType;
+
+        std::vector<ggml_tensor*> mKLayers;
+        std::vector<ggml_tensor*> mVLayers;
+
+        ggml_tensor* getKAtLayer(size_t i) const { return mKLayers[i]; }
+        ggml_tensor* getVAtLayer(size_t i) const { return mVLayers[i]; }
+    };
+
     
 private:
     Model* mModel;
+
+    std::vector<ggml_backend_t> mBackends; //! The backend
+    ggml_backend_t mBackendCpu = nullptr; // The backend using CPU
 
     size_t mComputeStartUs; //! When the decoding computation starts
 
@@ -103,7 +162,15 @@ private:
     float* mEmbeds;
     size_t mEmbedSize; //! The capacity of embeds in bytes
 
+    std::vector<uint8_t> mBufferComputeMeta;
+    ggml_backend_sched_t mSched = nullptr;
 
+    struct {
+        ggml_tensor* tokens;    // I32 [n_batch]
+        ggml_tensor* embeds;      // F32 [n_embd, n_batch]
+        ggml_tensor* positions; // I32 [n_batch]
+        ggml_tensor* KQ_mask;   // F32 [kv_size, n_batch]
+    } mInputs;
 };
 
 extern Context* createContext(Model* model, const infer::Context::Parameters& parameters);
