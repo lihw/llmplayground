@@ -107,6 +107,11 @@ private:
         ggml_context* ctx;
 
         uint32_t numKvEntries;
+
+        float extFactor;
+        float attnFactor;
+        float betaFast;
+        float betaSlow;
     };
 
     struct KvCache {

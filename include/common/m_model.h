@@ -68,7 +68,6 @@ public:
         uint32_t attentionHeadCount;
         uint32_t attentionHeadCountKv;
         uint32_t layerCount;//! The layer count
-        // uint32_t n_rot;
         uint32_t attentionKeyLength;// dimension of keys (d_k). d_q is assumed to be the same, but there are n_head q heads,
         //                        // and only n_head_kv k-v heads
         uint32_t attentionValueLength;// dimension of values (d_v) aka n_embd_head
@@ -76,6 +75,17 @@ public:
         uint32_t expertCount = 0;
         uint32_t expertUsedCount = 0;
         uint32_t vocabTypeCount = 0;// for BERT-style token types
+        
+        // ROFORMER: ENHANCED TRANSFORMER WITH ROTARY P OSITION E MBEDDING
+        struct {
+            size_t count;
+            size_t yarnOrigCtxLength;
+            float freqBaseTrain;
+            float freqScaleTrain;
+            RopeScalingType scalingTypeTrain;
+            bool fineTuned;
+        } rope; // Rotatary relative position encoding
+
 
         float normEps;
         float normRmsEps;

@@ -253,6 +253,14 @@ enum class NormType {
     NORM_RMS,
 };
 
+enum class RopeScalingType {
+    UNSPECIFIED = -1,
+    NONE = 0,
+    LINEAR = 1,
+    YARN = 2,
+    MAX_VALUE = YARN,
+};
+
 enum { MAX_NODES = 8192 };
 enum { MAX_EXPERTS = 8 };
 
@@ -261,6 +269,8 @@ extern Arch getArchFromString(const std::string& name) noexcept;
 extern std::string getKvString(Kv kv, Arch arch) noexcept;
 
 extern std::string getKvString(Kv kv, const std::string& archName) noexcept;
+    
+extern RopeScalingType getRopeScalingTypeFromString(const std::string& name) noexcept;
 
 M_END_NAMESPACE
 

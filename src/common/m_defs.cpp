@@ -188,4 +188,21 @@ std::string getKvString(Kv kv, const std::string& archName) noexcept
     return std::string(str);
 }
 
+RopeScalingType getRopeScalingTypeFromString(const std::string& name) noexcept
+{
+    static const std::map<RopeScalingType, const char *> LLAMA_ROPE_SCALING_TYPES = {
+        { RopeScalingType::NONE, "none" },
+        { RopeScalingType::LINEAR, "linear" },
+        { RopeScalingType::YARN, "yarn" },
+    };
+
+    for (const auto & kv : LLAMA_ROPE_SCALING_TYPES) {
+        if (kv.second == name) {
+            return RopeScalingType(kv.first);
+        }
+    }
+
+    return RopeScalingType::UNSPECIFIED;
+}
+
 M_END_NAMESPACE

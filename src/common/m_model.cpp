@@ -156,44 +156,44 @@ bool Model::loadParameters(ModelLoader& ml)
     params.attentionHeadCountKv = params.attentionHeadCount;
     ml.getKey(Kv::ATTENTION_HEAD_COUNT_KV, params.attentionHeadCountKv, false);
 
-    //bool rope_finetuned = false;
-    //ml.get_key(LLM_KV_ROPE_SCALING_FINETUNED, rope_finetuned, false);
-    //hparams.rope_finetuned = rope_finetuned;
+    bool ropeFinetuned = false;
+    ml.getKey(Kv::ROPE_SCALING_FINETUNED, ropeFinetuned, false);
+    params.rope.fineTuned = ropeFinetuned;
 
-    //hparams.n_yarn_orig_ctx = hparams.n_ctx_train;
-    //ml.get_key(LLM_KV_ROPE_SCALING_ORIG_CTX_LEN, hparams.n_yarn_orig_ctx, false);
+    params.rope.yarnOrigCtxLength = params.contextLength;
+    ml.getKey(Kv::ROPE_SCALING_ORIG_CTX_LEN, params.rope.yarnOrigCtxLength, false);
 
     //// rope_freq_base (optional)
-    //hparams.rope_freq_base_train = 10000.0f;
-    //ml.get_key(LLM_KV_ROPE_FREQ_BASE, hparams.rope_freq_base_train, false);
+    params.rope.freqBaseTrain = 10000.0f;
+    ml.getKey(Kv::ROPE_FREQ_BASE, params.rope.freqBaseTrain, false);
 
-    //std::string rope_scaling("linear");
-    //ml.get_key(LLM_KV_ROPE_SCALING_TYPE, rope_scaling, false);
-    //hparams.rope_scaling_type_train = llama_rope_scaling_type_from_string(rope_scaling);
-    //GGML_ASSERT(hparams.rope_scaling_type_train != LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED);
+    std::string ropeScaling("linear");
+    ml.getKey(Kv::ROPE_SCALING_TYPE, ropeScaling, false);
+    params.rope.scalingTypeTrain = getRopeScalingTypeFromString(ropeScaling);
+    assert(params.rope.scalingTypeTrain != RopeScalingType::UNSPECIFIED);
 
-    //// rope_freq_scale (inverse of the kv) is optional
-    //float ropescale = 0.0f;
-    //if (!ml.get_key(LLM_KV_ROPE_SCALING_FACTOR, ropescale, false)) {
-    //    // try the old key name
-    //    ml.get_key(LLM_KV_ROPE_SCALE_LINEAR, ropescale, false);
-    //}
-    //hparams.rope_freq_scale_train = ropescale == 0.0f ? 1.0f : 1.0f/ropescale;
+    // rope_freq_scale (inverse of the kv) is optional
+    float ropescale = 0.0f;
+    if (!ml.getKey(Kv::ROPE_SCALING_FACTOR, ropescale, false)) {
+        // try the old key name
+        ml.getKey(Kv::ROPE_SCALE_LINEAR, ropescale, false);
+    }
+    params.rope.freqScaleTrain = ropescale == 0.0f ? 1.0f : 1.0f / ropescale;
 
     // sanity check for n_rot (optional)
-    //{
-    //    hparams.n_rot = (hparams.n_head == 0) ? 0 : hparams.embedingLength / hparams.n_head;
+    {
+        params.rope.count = (params.attentionHeadCount == 0) ? 0 : params.embedingLength / params.attentionHeadCount;
 
-    //    ml.get_key(LLM_KV_ROPE_DIMENSION_COUNT, hparams.n_rot, false);
+        ml.getKey(Kv::ROPE_DIMENSION_COUNT, params.rope.count, false);
 
-    //    if (model.arch == LLM_ARCH_LLAMA || model.arch == LLM_ARCH_FALCON) {
-    //        if (hparams.n_rot != hparams.embedingLength / hparams.n_head) {
-    //            throw std::runtime_error(format("invalid n_rot: %u, expected %u", hparams.n_rot, hparams.embedingLength / hparams.n_head));
-    //        }
-    //    }
-    //    // gpt-neox n_rot = rotary_pct * (embedingLength / n_head)
-    //    // gpt-j n_rot = rotary_dim
-    //}
+        if (model.arch == Arch::LLAMA || model.arch == Arch::FALCON) {
+            if (params.rope.count != params.embedingLength / params.attentionHeadCount) {
+                throw std::runtime_error(fmt::format("invalid n_rot: %u, expected %u", params.rope.count, params.embedingLength / params.attentionHeadCount));
+            }
+        }
+        // gpt-neox n_rot = rotary_pct * (embedingLength / n_head)
+        // gpt-j n_rot = rotary_dim
+    }
 
     params.attentionKeyLength = (params.attentionHeadCount == 0) ? 0 : params.embedingLength / params.attentionHeadCount;
     ml.getKey(Kv::ATTENTION_KEY_LENGTH, params.attentionKeyLength, false);
@@ -203,7 +203,7 @@ bool Model::loadParameters(ModelLoader& ml)
 
     // arch-specific KVs
     if (arch == Arch::LLAMA) {
-        getKey(Kv::ATTENTION_LAYERNORM_RMS_EPS, params.normRmsEps);
+        ml.getKey(Kv::ATTENTION_LAYERNORM_RMS_EPS, params.normRmsEps);
 
         if (params.expertCount == 8) {
             switch (params.layerCount) {

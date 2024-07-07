@@ -310,12 +310,13 @@ ggml_tensor* Context::Builder::buildFFN(
 ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch, 
         const Model::Parameters& hparams, bool worseCase, const BuildCallback& cb) {
 
-    struct ggml_cgraph* gf = ggml_new_graph_custom(this, MAX_NODES, false);
+    struct ggml_cgraph* gf = ggml_new_graph_custom(ctx, MAX_NODES, false);
 
     auto* model = context->mModel;
 
     // mutable variable, needed during the last layer of the computation to skip unused tokens
     int32_t numTokens = batch.numTokens;
+    int32_t numHeads = hparams.attentionHeadCount;
 
     const int64_t attentionLength = hparams.attentionValueLength;
     assert(attentionLength == hparams.attentionKeyLength);
@@ -358,8 +359,8 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
             // <- Qcur: [T x B] (ggml transposes the outputs)
             ggml_tensor* Qcur = ggml_mul_mat(ctx, model->mLayers[il].wq, cur);
             cb(Qcur, "Qcur", il);
-            if (model->layers[il].bq) {
-                Qcur = ggml_add(ctx, Qcur, model.mLayers[il].bq);
+            if (model->getLayer[il].bq) {
+                Qcur = ggml_add(ctx, Qcur, model->getLayer[il].bq);
                 cb(Qcur, "Qcur", il);
             }
 
@@ -383,19 +384,22 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
                 cb(Vcur, "Vcur", il);
             }
 
-            // ?
+            // Rotatry (relative) position encoding.
+            // -> Qcur: [HT x H x B]
+            //    inputPosition: [B x 1]
+            // <- Qcur: [HT x H x B]
+            //         const int64_t n_embd_head = hparams.n_embd_head_v;
             Qcur = ggml_rope_custom(
-                ctx, ggml_reshape_3d(ctx, Qcur, n_embd_head, n_head, n_tokens), inputPosition,
-                n_rot, rope_type, 0, n_orig_ctx, freq_base, freq_scale,
-                ext_factor, attn_factor, beta_fast, beta_slow
-            );
+                ctx, ggml_reshape_3d(ctx, Qcur, hparams.attentionHeadCountKv, numHeads, numTokens), inputPosition,
+                hparams.rope.count, int(hparams.rope.scalingTypeTrain), 0, hparams.rope.yarnOrigCtxLength, hparams.rope.freqBaseTrain, hparams.rope.freqScaleTrain,
+                extFactor, attnFactor, betaFast, betaSlow);
             cb(Qcur, "Qcur", il);
 
             // ?
             Kcur = ggml_rope_custom(
-                ctx, ggml_reshape_3d(ctx, Kcur, n_embd_head, n_head_kv, n_tokens), inputPosition,
-                n_rot, rope_type, 0, n_orig_ctx, freq_base, freq_scale,
-                ext_factor, attn_factor, beta_fast, beta_slow
+                ctx, ggml_reshape_3d(ctx, Kcur, hparams.attentionKeyLength, hparams.attentionHeadCountKv, numTokens), inputPosition,
+                hparams.rope.count, int(hparams.rope.scalingTypeTrain), 0, hparams.rope.yarnOrigCtxLength, hparams.rope.freqBaseTrain, hparams.rope.freqScaleTrain,
+                extFactor, attnFactor, betaFast, betaSlow
             );
             cb(Kcur, "Kcur", il);
 
@@ -412,7 +416,7 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
             inpSA = ggml_get_rows(ctx, inpSA, inp_out_ids);
         }
 
-        struct ggml_tensor* ffn_inp = ggml_add(ctx, cur, inpSA);
+        ggml_tensor* ffn_inp = ggml_add(ctx, cur, inpSA);
         cb(ffn_inp, "ffn_inp", il);
 
         // feed-forward network
