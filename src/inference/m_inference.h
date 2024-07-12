@@ -83,22 +83,34 @@ private:
 
     using BuildCallback = std::function<void(struct ggml_tensor * cur, const char * name, int nl)>;
 
+    struct KvCache;
+
     struct Builder {
         explicit Builder();
 
         ~Builder();
 
-        ggml_cgraph* buildLlama(const Batch& batch, bool worseCase, const BuildCallback& cb);
+        ggml_cgraph* buildLlama(Context* context, const Batch& batch, const KvCache& kvCache,
+                const Model::Parameters& hparams, bool worseCase, const BuildCallback& cb);
 
         ggml_tensor* buildInputEmbed(Context* context, const Model::Parameters& hparams, const Batch& batch,
                 ggml_tensor* tokenEmbed, const BuildCallback& cb);
 
-        ggml_tensor* buildNorm(Context* context, ggml_tensor * cur, const Model::Parameters& hparams, 
+        ggml_tensor* buildNorm(ggml_tensor * cur, const Model::Parameters& hparams, 
                 ggml_tensor* mw, ggml_tensor* mb, NormType type, const BuildCallback& cb, int il);
 
         ggml_tensor* buildInputPosition(Context* context, const Batch& batch, const BuildCallback& cb);
 
-        ggml_tensor* buildInputKQMask(Context* context, const Batch& batch, bool causal = true);
+        ggml_tensor* buildInputKqMask(Context* context, const Batch& batch, const BuildCallback& cb, bool causal = true);
+
+        ggml_tensor* buildKv(const Model* model, const KvCache& kv, ggml_cgraph* graph, ggml_tensor* wo, ggml_tensor* woB,
+            ggml_tensor* k, ggml_tensor* v, ggml_tensor* q, ggml_tensor* kqMask, ggml_tensor* kqPosition, int64_t contextLength,
+            int32_t numTokens, int32_t kv_head, int32_t n_kv, float kqScale, const BuildCallback& cb, int il);
+
+        ggml_tensor* buildFFN(ggml_context* ctx, ggml_tensor* cur, ggml_tensor* upW, ggml_tensor* upB, ggml_tensor* gate, ggml_tensor* gate_b,
+            ggml_tensor* downW, ggml_tensor* downB, ggml_tensor* act_scales, FfnOpType op, FfnGateType gateType, const BuildCallback& cb, int il);
+
+        ggml_tensor* buildInputOutIds(Context* context, const BuildCallback& cb, int32_t numOutputs);
 
         //
         //
@@ -106,7 +118,8 @@ private:
 
         ggml_context* ctx;
 
-        uint32_t numKvEntries;
+        uint32_t numKv;
+        uint32_t numOutputs;
 
         float extFactor;
         float attnFactor;
@@ -121,22 +134,44 @@ private:
 
         std::vector<ggml_context*> mContexts;
 
-        size_t mHead;
-        size_t mSize;
-        bool   mHasShift;
-        bool   mRecurrent;
-        bool   mUsed;
+        size_t head;
+        size_t size;
+        size_t count;
+        bool   hasShift;
+        bool   recurrent;
+        bool   used;
 
-        ggml_type mKType;
-        ggml_type mVType;
+        ggml_type kType;
+        ggml_type vType;
 
-        std::vector<ggml_tensor*> mKLayers;
-        std::vector<ggml_tensor*> mVLayers;
+        std::vector<ggml_tensor*> kLayers;
+        std::vector<ggml_tensor*> vLayers;
+    } mKvCache;
 
-        ggml_tensor* getKAtLayer(size_t i) const { return mKLayers[i]; }
-        ggml_tensor* getVAtLayer(size_t i) const { return mVLayers[i]; }
-    };
+    struct Control {
+        std::vector<ggml_tensor *> tensors; // per layer
+        std::vector<ggml_context *> contexts;
+        std::vector<ggml_backend_buffer_t> buffers;
 
+        int32_t layerStart = -1;
+        int32_t layerEnd   = -1;
+
+        ggml_tensor * tensorFor(int il) const {
+            if (il < 0 || il < layerStart || il > layerEnd || (size_t) il >= tensors.size()) {
+                return nullptr;
+            }
+            return tensors[il];
+        }
+
+        ~Control() {
+            for (struct ggml_context * ctx : contexts) {
+                ggml_free(ctx);
+            }
+            for (ggml_backend_buffer_t buffer : buffers) {
+                ggml_backend_buffer_free(buffer);
+            }
+        }
+    };       
     
 private:
     Model* mModel;
@@ -174,7 +209,8 @@ private:
         ggml_tensor* tokens;    // I32 [n_batch]
         ggml_tensor* embeds;      // F32 [n_embd, n_batch]
         ggml_tensor* positions; // I32 [n_batch]
-        ggml_tensor* KQ_mask;   // F32 [kv_size, n_batch]
+        ggml_tensor* kqMask;   // F32 [kv_size, n_batch]
+        ggml_tensor* inputOutIds; // I32 [n_outputs]
     } mInputs;
 };
 
@@ -184,14 +220,6 @@ extern Context* createContext(Model* model, const infer::Context::Parameters& pa
 }; // namespace infer
 
 #if 0
-struct Session {
-
-};
-
-class Inference {
-    M_NO_COPY_CONSTRUCTOR(Inference);
-    M_NO_MOVE_CONSTRUCTOR(Inference);
-
 public:
     struct CParams {
         uint32_t n_ctx;           // context size used during inference

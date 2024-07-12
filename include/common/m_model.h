@@ -120,7 +120,11 @@ public:
     ~Model();
 
     bool isValid() const {
-        return !mContexts.empty() && !mLayers.empty() && !mTensorsByName.empty();
+        return !mContexts.empty() && !layers.empty() && !mTensorsByName.empty();
+    }
+
+    Arch getArch() const {
+        return arch;
     }
 
 private:
@@ -162,19 +166,9 @@ public:
 
     bool loadVocab(ModelLoader& ml);
 
-private:
-    // contexts where the model tensors metadata is stored
-    std::vector<ggml_context *> mContexts;
-
-    //! the model memory buffers for the tensor data
-    std::vector<ggml_backend_buffer_t> mBuffers;
-
-    // objects representing data potentially being locked in memory
-    MemoryLocks mMemoryLocks;
-    //  llama_mlocks mlock_mmaps;
-
-    // for quantize-stats only
-    std::vector<std::pair<std::string, struct ggml_tensor *>> mTensorsByName;
+    LayerBufferType& getLayerBufferType(int32_t layer) {
+        return layerBufferTypes[layer];
+    }
     
     struct {
         ggml_tensor *token_embed;//! ???
@@ -188,7 +182,7 @@ private:
         ggml_tensor *output;
         //ggml_tensor *output_b;
 
-    } mTensors;
+    } tensors;
     
     struct Layer {
         // normalization
@@ -262,7 +256,22 @@ private:
         struct ggml_tensor *ssm_dt_b;
 #endif
     };
-    std::vector<Layer> mLayers;
+    std::vector<Layer> layers;
+
+private:
+    // contexts where the model tensors metadata is stored
+    std::vector<ggml_context *> mContexts;
+
+    //! the model memory buffers for the tensor data
+    std::vector<ggml_backend_buffer_t> mBuffers;
+
+    // objects representing data potentially being locked in memory
+    MemoryLocks mMemoryLocks;
+    //  llama_mlocks mlock_mmaps;
+
+    // for quantize-stats only
+    std::vector<std::pair<std::string, struct ggml_tensor *>> mTensorsByName;
+    
 
     int64_t mLoadUs = 0;//! when to load the model
     int64_t mStartUs = 0;//! when to load the tensors

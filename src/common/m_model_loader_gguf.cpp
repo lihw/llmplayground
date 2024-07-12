@@ -66,7 +66,7 @@ static std::string ggufGetTensorShape(const std::vector<int64_t>& ne) {
     return buf;
 }
 */
-static std::string ggufGetTensorShape(const struct ggml_tensor * t) 
+static std::string ggufGetTensorShape(const ggml_tensor * t) 
 {
     char buf[256];
     snprintf(buf, sizeof(buf), "%5" PRId64, t->ne[0]);

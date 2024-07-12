@@ -253,6 +253,18 @@ enum class NormType {
     NORM_RMS,
 };
 
+enum class FfnOpType {
+    SILU,
+    GELU,
+    RELU,
+    RELU_SQR,
+};
+
+enum class FfnGateType {
+    SEQ,
+    PAR, // ffn_gate is parallel to ffn_up
+};
+
 enum class RopeScalingType {
     UNSPECIFIED = -1,
     NONE = 0,

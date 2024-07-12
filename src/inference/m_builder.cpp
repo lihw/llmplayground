@@ -1,6 +1,10 @@
 
 #include "m_inference.h"
 
+#include "m_batch.h"
+
+#include <ggml/ggml-backend.h>
+
 #include <spdlog/spdlog.h>
 
 #include <cassert>
@@ -10,7 +14,10 @@ M_BEGIN_NAMESPACE
 namespace infer {
 
 Context::Builder::Builder() {
-    n_kv = (worst_case ? kv_self.size : kv_self.n);
+    //n_kv = (worst_case ? kv_self.size : kv_self.n);
+
+    n_kv(worst_case ? kv_self.size : kv_self.n),
+        n_outputs(worst_case ? n_tokens : lctx.n_outputs),
 }
 
 ggml_tensor* Context::Builder::buildInputEmbed(
@@ -29,7 +36,7 @@ ggml_tensor* Context::Builder::buildInputEmbed(
 
         inputLayer = ggml_get_rows(ctx, tokenEmbed, context->mInputs.tokens);
     } else {
-        context->mInputs.embeds = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hparams.embedLength, batch.numTokens);
+        context->mInputs.embeds = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hparams.embedingLength, batch.numTokens);
         inputLayer = context->mInputs.embeds;
         ggml_set_input(inputLayer);
     }
@@ -40,7 +47,6 @@ ggml_tensor* Context::Builder::buildInputEmbed(
 }
 
 ggml_tensor* Context::Builder::buildNorm(
-        Context* context,
         ggml_tensor* cur,
         const Model::Parameters& hparams,
         struct ggml_tensor * mw,
@@ -84,42 +90,32 @@ ggml_tensor * Context::Builder::buildInputPosition(Context* context, const Batch
 }
 
 
-ggml_tensor* Context::Builder::buildInputKqMask(Context* context, const Batch& batch, bool causal) {
+ggml_tensor* Context::Builder::buildInputKqMask(Context* context, const Batch& batch, const BuildCallback& cb, bool causal) {
 
     if (causal) {
-        context->mInputs.KQ_mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, numKvEntries, batch.numTokens);
+        context->mInputs.kqMask = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, numKvEntries, batch.numTokens);
     } else {
-        context->mInputs.KQ_mask = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, batch.numTokens, batch.numTokens);
+        context->mInputs.kqMask = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, batch.numTokens, batch.numTokens);
     }
-    cb(context->mInputs.inp_KQ_mask, "KQ_mask", -1);
-    ggml_set_input(context->mInputs.inp_KQ_mask);
-    return context->mInputs.inp_KQ_mask;
+    cb(context->mInputs.kqMask, "KQ_mask", -1);
+    ggml_set_input(context->mInputs.kqMask);
+    return context->mInputs.kqMask;
 }
 
-ggml_tensor* Context::Builder::buildKv(
-        const Model* model,
-        const KvCache& kv,
-        ggml_cgraph * graph,
-        ggml_tensor * wo,
-        ggml_tensor * wo_b,
-        ggml_tensor * k,
-        ggml_tensor * v,
-        ggml_tensor * q,
-        ggml_tensor * kq_mask,
-        ggml_tensor * kq_pos,
-        int64_t   n_ctx,
-        int32_t   n_tokens,
-        int32_t   kv_head,
-        int32_t   n_kv,
-        float     kq_scale,
-        const BuildCallback& cb,
-        int       il) {
+ggml_tensor* Context::Builder::buildKv(const Model* model,
+        const Context::KvCache& kv, ggml_cgraph* graph, ggml_tensor* wo,
+        ggml_tensor* woB, ggml_tensor* k, ggml_tensor* v, ggml_tensor* q,
+        ggml_tensor* kqMask, ggml_tensor* kqPos, int64_t contextLength, 
+        int32_t numTokens, int32_t kv_head, int32_t n_kv, float kqScale, const BuildCallback& cb,
+        int il) {
 
     // these nodes are added to the graph together so that they are not reordered
     // by doing so, the number of splits in the graph is reduced
     ggml_build_forward_expand(graph, q);
     ggml_build_forward_expand(graph, k);
     ggml_build_forward_expand(graph, v);
+
+    const auto& hparams = model->params;
 
     {
         const int64_t embedingKGqa   = hparams.attentionKeyLength * hparams.attentionHeadCountKv;
@@ -128,33 +124,33 @@ ggml_tensor* Context::Builder::buildKv(
         assert(kv.size == hparams.contextLength);
 
         // compute the transposed [n_tokens, n_embd] V matrix
-        assert(v->ne[0] == embedingVGqa && v->ne[1] == batch.numTokens);
+        assert(v->ne[0] == embedingVGqa && v->ne[1] == numTokens);
 
         ggml_tensor* v_t = ggml_transpose(ctx, v);
         cb(v_t, "v_cur_t", il);
 
         //??
-        auto kl = kv.getKAtLayer(il);
-        ggml_tensor* kCacheView = ggml_view_1d(ctx, kl, batch.numTokens * embedingKGqa,
+        auto kl = kv.kLayers[il];
+        ggml_tensor* kCacheView = ggml_view_1d(ctx, kl, numTokens * embedingKGqa,
                 ggml_row_size(kl->type, embedingKGqa) * kv_head);
         cb(kCacheView, "k_cache_view", il);
 
         //??
-        auto vl = kv.getVAtLayer(il);
-        ggml_tensor* vCacheView = ggml_view_2d(ctx, vl, batch.numTokens, embedingVGqa,
+        auto vl = kv.vLayers[il];
+        ggml_tensor* vCacheView = ggml_view_2d(ctx, vl, numTokens, embedingVGqa,
                 ggml_element_size(vl) * hparams.contextLength,
                 ggml_element_size(vl) * kv_head);
         cb(vCacheView, "v_cache_view", il);
 
         // important: storing RoPE-ed version of K in the KV cache!
-        ggml_build_forward_expand(graph, ggml_cpy(ctx, k,   k_cache_view));
-        ggml_build_forward_expand(graph, ggml_cpy(ctx, v_t, v_cache_view));
+        ggml_build_forward_expand(graph, ggml_cpy(ctx, k, kCacheView));
+        ggml_build_forward_expand(graph, ggml_cpy(ctx, v_t, vCacheView));
     }
 
     ggml_tensor * cur;
 
     {
-        const int64_t n_head        = hparams.headCount;
+        const int64_t n_head        = hparams.attentionHeadCount;
         const int64_t n_head_kv     = hparams.n_head_kv;
         const int64_t n_embd_head_k = hparams.n_embd_head_k;
         const int64_t embedingKGqa  = hparams.attentionKeyLength * hparams.attentionHeadCountKv;
@@ -185,8 +181,8 @@ ggml_tensor* Context::Builder::buildKv(
         ggml_tensor * vv =
             ggml_view_3d(ctx, kvCache.getVAtLayer(il),
                     n_kv, n_embd_head_v, n_head_kv,
-                    ggml_element_size(kv.v_l[il])*n_ctx,
-                    ggml_element_size(kv.v_l[il])*n_ctx*n_embd_head_v,
+                    ggml_element_size(kv.vLayers[il])*n_ctx,
+                    ggml_element_size(kv.vLayers[il])*n_ctx*n_embd_head_v,
                     0);
         cb(vv, "v", il);
 
@@ -202,12 +198,12 @@ ggml_tensor* Context::Builder::buildKv(
         ggml_build_forward_expand(graph, cur);
 
         cur = ggml_mul_mat(ctx, wo, cur);
-        if (wo_b) {
+        if (woB) {
             cb(cur, "kqv_wo", il);
         }
 
-        if (wo_b) {
-            cur = ggml_add(ctx, cur, wo_b);
+        if (woB) {
+            cur = ggml_add(ctx, cur, woB);
         }
 
         return cur;
@@ -217,20 +213,10 @@ ggml_tensor* Context::Builder::buildKv(
     return cur;
 }
 
-ggml_tensor* Context::Builder::buildFFN(
-        struct ggml_context* ctx,
-        struct ggml_tensor* cur,
-        struct ggml_tensor* upW,
-        struct ggml_tensor* upB,
-        struct ggml_tensor* gate,
-        struct ggml_tensor* gate_b,
-        struct ggml_tensor* downW,
-        struct ggml_tensor* downB,
-        struct ggml_tensor* act_scales,
-        ActOpType actOp,
-        GateType gateType,
-        const BuildCallback& cb,
-        int   il) {
+ggml_tensor* Context::Builder::buildFFN(ggml_context* ctx,
+        ggml_tensor* cur, ggml_tensor* upW, ggml_tensor* upB,
+        ggml_tensor* gate, ggml_tensor* gate_b, ggml_tensor* downW, ggml_tensor* downB,
+        ggml_tensor* act_scales, FfnOpType op, FfnGateType gateType, const BuildCallback& cb, int il) {
     ggml_tensor * tmp = ggml_mul_mat(ctx, upW, cur);
     cb(tmp, "ffn_up", il);
 
@@ -240,13 +226,13 @@ ggml_tensor* Context::Builder::buildFFN(
     }
 
     if (gate) {
-        switch (type_gate) {
-            case LLM_FFN_SEQ:
+        switch (gateType) {
+            case FfnGateType::SEQ:
                 {
                     cur = ggml_mul_mat(ctx, gate, tmp);
                     cb(cur, "ffn_gate", il);
                 } break;
-            case LLM_FFN_PAR:
+            case FfnGateType::PAR:
                 {
                     cur = ggml_mul_mat(ctx, gate, cur);
                     cb(cur, "ffn_gate", il);
@@ -261,13 +247,13 @@ ggml_tensor* Context::Builder::buildFFN(
         cur = tmp;
     }
 
-    switch (actOp) {
-        case ActType::SILU:
+    switch (op) {
+        case FfnOpType::SILU:
             {
                 cur = ggml_silu(ctx, cur);
                 cb(cur, "ffn_silu", il);
             } break;
-        case ActType::GELU:
+        case FfnOpType::GELU:
             {
                 cur = ggml_gelu(ctx, cur);
                 cb(cur, "ffn_gelu", il);
@@ -276,12 +262,12 @@ ggml_tensor* Context::Builder::buildFFN(
                     cb(cur, "ffn_act", il);
                 }
             } break;
-        case ActType::RELU:
+        case FfnOpType::RELU:
             {
                 cur = ggml_relu(ctx, cur);
                 cb(cur, "ffn_relu", il);
             } break;
-        case ActType::RELU_SQR:
+        case FfnOpType::RELU_SQR:
             {
                 cur = ggml_relu(ctx, cur);
                 cb(cur, "ffn_relu", il);
@@ -291,12 +277,12 @@ ggml_tensor* Context::Builder::buildFFN(
             } break;
     }
 
-    if (type_gate == LLM_FFN_PAR) {
+    if (gateType == FfnGateType::PAR) {
         cur = ggml_mul(ctx, cur, tmp);
         cb(cur, "ffn_gate_par", il);
     }
 
-    cur = ggml_mul_mat(ctx, down, cur);
+    cur = ggml_mul_mat(ctx, downW, cur);
     cb(cur, "ffn_down", il);
 
     if (downB) {
@@ -306,11 +292,22 @@ ggml_tensor* Context::Builder::buildFFN(
 
     return cur;
 }
+ 
+ggml_tensor* Context::Builder::buildInputOutIds(Context* context, const BuildCallback& cb, int32_t numOutputs) {
+    context->mInputs.inputOutIds = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, numOutputs);
+    cb(context->mInputs.inputOutIds, "inp_out_ids", -1);
+    ggml_set_input(context->mInputs.inputOutIds);
+    return context->mInputs.inputOutIds;
+}
 
-ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch, 
-        const Model::Parameters& hparams, bool worseCase, const BuildCallback& cb) {
+ggml_cgraph* Context::Builder::buildLlama(Context* context, const Batch& batch, const KvCache& kvCache,
+        const Model::Parameters& hparams, bool worstCase, const BuildCallback& cb) {
 
-    struct ggml_cgraph* gf = ggml_new_graph_custom(ctx, MAX_NODES, false);
+    numKv = worstCase ? kvCache.size : kvCache.count;
+    numOutputs = worstCase ? batch.numTokens : context->mNumOutputs;
+    int32_t kvHead = worstCase ? (kvCache.recurrent ? 0 : kvCache.size - batch.numTokens) : kvCache.head;
+
+    ggml_cgraph* gf = ggml_new_graph_custom(ctx, MAX_NODES, false);
 
     auto* model = context->mModel;
 
@@ -332,22 +329,25 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
 
     // inputEmbed: [B x T] F32
     // model->mTensors.token_embed: [C x T] F32, i.e, [32000 x 4096] in llama 7b
-    inputEmbed = buildInputEmbed(context, hparams, batch, model->mTensors.token_embed, cb);
+    inputEmbed = buildInputEmbed(context, hparams, batch, model->tensors.token_embed, cb);
 
     // inputPositions - contains the positions: [B x 1] I32
     inputPosition = buildInputPosition(context, batch, cb);
 
-    // KqMask (mask for 1 head, it will be broadcasted to all heads)
-    // KqMask: [B x KV_CACHE_SIZE] F32
-    ggml_tensor* KqMask = buildInputKqMask(context, batch, cb, casual);
+    // kqMask (mask for 1 head, it will be broadcasted to all heads)
+    // kqMask: [B x KV_CACHE_SIZE] F32
+    ggml_tensor* kqMask = buildInputKqMask(context, batch, cb, true);
+
+    // layerInput: [B x T] F32, The input for next layer.
+    auto* inputNextLayer = inputEmbed; 
 
     for (int il = 0; il < model->params.layerCount; ++il) {
-        struct ggml_tensor* inputSA = inputLayer;
+        ggml_tensor* inputThisLayer = inputNextLayer;
 
         // -> cur: [B x T]
         //    model->mLayer.attn_norm: [1 x T] F32, i.e., [1 x 4096] in llama 7b
         // <- cur: [B x T]
-        cur = buildNorm(ctx, inputEmbed, hparams, model->mLayers[il].attn_norm, nullptr, NormType::NORM_RMS, cb, il);
+        cur = buildNorm(inputEmbed, hparams, model->layers[il].attn_norm, nullptr, NormType::NORM_RMS, cb, il);
         cb(cur, "attn_norm", il);
 
         // self-attention
@@ -357,45 +357,47 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
             // -> cur: [B x T] (ggml takes in the transposed input, A x B^T = C^T
             //    model->wq: [T x T], i.e, [4096 x 4096] in llama 7b
             // <- Qcur: [T x B] (ggml transposes the outputs)
-            ggml_tensor* Qcur = ggml_mul_mat(ctx, model->mLayers[il].wq, cur);
+            ggml_tensor* Qcur = ggml_mul_mat(ctx, model->layers[il].wq, cur);
             cb(Qcur, "Qcur", il);
-            if (model->getLayer[il].bq) {
-                Qcur = ggml_add(ctx, Qcur, model->getLayer[il].bq);
+            if (model->layers[il].bq) {
+                Qcur = ggml_add(ctx, Qcur, model->layers[il].bq);
                 cb(Qcur, "Qcur", il);
             }
 
             // -> cur: [B x T] (ggml takes in the transposed input, A x B^T = C^T
             //    model->wk: [T x T], i.e, [4096 x 4096] in llama 7b
             // <- Kcur: [T x B] (ggml transposes the outputs)
-            ggml_tensor* Kcur = ggml_mul_mat(ctx, model->mLayers[il].wk, cur);
+            ggml_tensor* Kcur = ggml_mul_mat(ctx, model->layers[il].wk, cur);
             cb(Kcur, "Kcur", il);
-            if (model->mLayers[il].bk) {
-                Kcur = ggml_add(ctx, Kcur, model->mLayers[il].bk);
+            if (model->layers[il].bk) {
+                Kcur = ggml_add(ctx, Kcur, model->layers[il].bk);
                 cb(Kcur, "Kcur", il);
             }
 
             // -> cur: [B x T] (ggml takes in the transposed input, A x B^T = C^T
             //    model->wk: [T x T], i.e, [4096 x 4096] in llama 7b
             // <- Vcur: [T x B] (ggml transposes the outputs)
-            struct ggml_tensor* Vcur = ggml_mul_mat(ctx, model->mLayers[il].wv, cur);
+            struct ggml_tensor* Vcur = ggml_mul_mat(ctx, model->layers[il].wv, cur);
             cb(Vcur, "Vcur", il);
-            if (model->mLayers[il].bv) {
-                Vcur = ggml_add(ctx, Vcur, model->mLayers[il].bv);
+            if (model->layers[il].bv) {
+                Vcur = ggml_add(ctx, Vcur, model->layers[il].bv);
                 cb(Vcur, "Vcur", il);
             }
 
             // Rotatry (relative) position encoding.
+            // Check out the reference paper, https://openreview.net/forum?id=wHBfxhZu1u
+            // YaRN: Efficient Context Window Extension of Large Language Models
+            // ??
             // -> Qcur: [HT x H x B]
             //    inputPosition: [B x 1]
             // <- Qcur: [HT x H x B]
-            //         const int64_t n_embd_head = hparams.n_embd_head_v;
             Qcur = ggml_rope_custom(
                 ctx, ggml_reshape_3d(ctx, Qcur, hparams.attentionHeadCountKv, numHeads, numTokens), inputPosition,
                 hparams.rope.count, int(hparams.rope.scalingTypeTrain), 0, hparams.rope.yarnOrigCtxLength, hparams.rope.freqBaseTrain, hparams.rope.freqScaleTrain,
                 extFactor, attnFactor, betaFast, betaSlow);
             cb(Qcur, "Qcur", il);
 
-            // ?
+            // Ditto
             Kcur = ggml_rope_custom(
                 ctx, ggml_reshape_3d(ctx, Kcur, hparams.attentionKeyLength, hparams.attentionHeadCountKv, numTokens), inputPosition,
                 hparams.rope.count, int(hparams.rope.scalingTypeTrain), 0, hparams.rope.yarnOrigCtxLength, hparams.rope.freqBaseTrain, hparams.rope.freqScaleTrain,
@@ -403,58 +405,61 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
             );
             cb(Kcur, "Kcur", il);
 
-            cur = llm_build_kv(ctx, model, hparams, kv_self, gf,
-                model->mLayers[il].wo, model->mLayers[il].bo,
-                Kcur, Vcur, Qcur, KQ_mask, nullptr, n_ctx, n_tokens, kv_head, n_kv, 1.0f / sqrtf(float(n_embd_head)), cb, il);
+            cur = buildKv(model, kvCache, gf,
+                model->layers[il].wo, model->layers[il].bo,
+                Kcur, Vcur, Qcur, kqMask, nullptr, hparams.contextLength, numTokens, kvHead, numKv, 1.0f / sqrtf(float(hparams.attentionValueLength)), cb, il);
         }
 
-        if (il == n_layer - 1) {
+        // ??
+        if (il == model->layers.size() - 1) {
             // skip computing output for unused tokens
-            struct ggml_tensor* inp_out_ids = build_inp_out_ids();
-            n_tokens = n_outputs;
-            cur = ggml_get_rows(ctx, cur, inp_out_ids);
-            inpSA = ggml_get_rows(ctx, inpSA, inp_out_ids);
+            ggml_tensor* inputOutIds = buildInputOutIds(context, cb, numOutputs);
+            numTokens = numOutputs;
+            cur = ggml_get_rows(ctx, cur, inputOutIds);
+            inputThisLayer = ggml_get_rows(ctx, inputThisLayer, inputOutIds);
         }
 
-        ggml_tensor* ffn_inp = ggml_add(ctx, cur, inpSA);
-        cb(ffn_inp, "ffn_inp", il);
+        // Residual forwarding
+        // -> cur: [B x T]
+        //    inpSA: [B x T]
+        // <- cur: [B x T]
+        ggml_tensor* ffnInp = ggml_add(ctx, cur, inputThisLayer);
+        cb(ffnInp, "ffn_inp", il);
 
         // feed-forward network
-        if (model->mLayers[il].ffn_gate_inp == nullptr) {
-            cur = buildNorm(ctx, ffn_inp, hparams,
-                model->mLayers[il].ffn_norm, NULL,
-                NormType::NORM_RMS, cb, il);
+        if (model->layers[il].ffn_gate_inp == nullptr) {
+            cur = buildNorm(ffnInp, hparams, model->layers[il].ffn_norm, NULL,
+                    NormType::NORM_RMS, cb, il);
             cb(cur, "ffn_norm", il);
 
-            cur = llm_build_ffn(ctx, cur,
-                model->mLayers[il].ffn_up, NULL,
-                model->mLayers[il].ffn_gate, NULL,
-                model->mLayers[il].ffn_down, NULL,
-                NULL,
-                LLM_FFN_SILU, LLM_FFN_PAR, cb, il);
+            cur = buildFFN(ctx, cur,
+                model->layers[il].ffn_up, nullptr,
+                model->layers[il].ffn_gate, nullptr,
+                model->layers[il].ffn_down, nullptr,
+                nullptr, FfnOpType::SILU, FfnGateType::PAR, cb, il);
             cb(cur, "ffn_out", il);
         } else {
             // MoE branch
-            cur = llm_build_norm(ctx, ffn_inp, hparams,
-                model->mLayers[il].ffn_norm, NULL,
-                LLM_NORM_RMS, cb, il);
+            cur = buildNorm(ffnInp, hparams,
+                model->layers[il].ffn_norm, NULL,
+                NormType::NORM_RMS, cb, il);
             cb(cur, "ffn_norm", il);
 
-            ggml_tensor* logits = ggml_mul_mat(ctx, model->mLayers[il].ffn_gate_inp, cur); // [n_tokens, num_experts]
+            ggml_tensor* logits = ggml_mul_mat(ctx, model->layers[il].ffn_gate_inp, cur); // [n_tokens, num_experts]
             cb(logits, "ffn_moe_logits", il);
 
             ggml_tensor* probs = ggml_soft_max(ctx, logits); // [n_tokens, num_experts]
             cb(probs, "ffn_moe_probs", il);
 
             // select experts
-            ggml_tensor* selected_experts = ggml_top_k(ctx, probs, n_expert_used); // [n_tokens, num_experts_per_tok]
+            ggml_tensor* selected_experts = ggml_top_k(ctx, probs, hparams.expertUsedCount); // [n_tokens, num_experts_per_tok]
             cb(selected_experts->src[0], "ffn_moe_argsort", il);
 
             ggml_tensor* weights = ggml_get_rows(ctx,
-                ggml_reshape_3d(ctx, probs, 1, n_expert, n_tokens), selected_experts);
+                ggml_reshape_3d(ctx, probs, 1, hparams.expertCount, numTokens), selected_experts);
             cb(weights, "ffn_moe_weights", il);
 
-            weights = ggml_reshape_2d(ctx, weights, n_expert_used, n_tokens); // [n_tokens, num_experts_per_tok]
+            weights = ggml_reshape_2d(ctx, weights, hparams.expertUsedCount, numTokens); // [n_tokens, num_experts_per_tok]
 
             ggml_tensor* weights_sum = ggml_sum_rows(ctx, weights);
             cb(weights_sum, "ffn_moe_weights_sum", il);
@@ -465,13 +470,13 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
             // compute expert outputs
             ggml_tensor* moe_out = nullptr;
 
-            for (int i = 0; i < n_expert_used; ++i) {
+            for (int i = 0; i < hparams.expertUsedCount; ++i) {
                 ggml_tensor* cur_expert;
 
-                ggml_tensor* cur_up = ggml_mul_mat_id(ctx, model->mLayers[il].ffn_up_exps, selected_experts, i, cur);
+                ggml_tensor* cur_up = ggml_mul_mat_id(ctx, model->layers[il].ffn_up_exps, selected_experts, i, cur);
                 cb(cur_up, "ffn_moe_up", il);
 
-                ggml_tensor* cur_gate = ggml_mul_mat_id(ctx, model->mLayers[il].ffn_gate_exps, selected_experts, i, cur);
+                ggml_tensor* cur_gate = ggml_mul_mat_id(ctx, model->layers[il].ffn_gate_exps, selected_experts, i, cur);
                 cb(cur_gate, "ffn_moe_gate", il);
 
                 cur_gate = ggml_silu(ctx, cur_gate);
@@ -480,11 +485,11 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
                 cur_expert = ggml_mul(ctx, cur_up, cur_gate);
                 cb(cur_expert, "ffn_moe_gate_par", il);
 
-                cur_expert = ggml_mul_mat_id(ctx, model->mLayers[il].ffn_down_exps, selected_experts, i, cur_expert); // [n_tokens, n_embd]
+                cur_expert = ggml_mul_mat_id(ctx, model->layers[il].ffn_down_exps, selected_experts, i, cur_expert); // [n_tokens, n_embd]
                 cb(cur_expert, "ffn_moe_down", il);
 
                 cur_expert = ggml_mul(ctx, cur_expert,
-                    ggml_view_2d(ctx, weights, 1, n_tokens, weights->nb[1], i * weights->nb[0]));
+                    ggml_view_2d(ctx, weights, 1, numTokens, weights->nb[1], i * weights->nb[0]));
                 cb(cur_expert, "ffn_moe_weighted", il);
 
                 if (i == 0) {
@@ -499,28 +504,30 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, Batch& batch,
             cur = moe_out;
         }
 
-        cur = ggml_add(ctx, cur, ffn_inp);
+        // Another residual
+        cur = ggml_add(ctx, cur, ffnInp);
         cb(cur, "ffn_out", il);
 
-        ggml_tensor* layer_dir = lctx.cvec.tensor_for(il);
-        if (layer_dir != nullptr) {
-            cur = ggml_add(ctx, cur, layer_dir);
+        // Apply a control vector to the output of this layer.
+        ggml_tensor* layerDir = context->control.tensor_for(il);
+        if (layerDir != nullptr) {
+            cur = ggml_add(ctx, cur, layerDir);
         }
         cb(cur, "l_out", il);
 
         // input for next layer
-        inpL = cur;
+        inputNextLayer = cur;
     }
 
-    cur = inpL;
+    cur = inputNextLayer;
 
-    cur = buildNorm(ctx, cur, hparams,
-        model.output_norm, NULL,
+    cur = buildNorm(cur, hparams,
+        model->tensors.output_norm, NULL,
         NormType::NORM_RMS, cb, -1);
     cb(cur, "result_norm", -1);
 
     // lm_head
-    cur = ggml_mul_mat(ctx, model.output, cur);
+    cur = ggml_mul_mat(ctx, model->tensors.output, cur);
     cb(cur, "result_output", -1);
 
     ggml_build_forward_expand(gf, cur);
@@ -537,19 +544,19 @@ ggml_cgraph* Context::_buildGraph(const Batch& batch, bool worstCase) {
             ggml_set_name(cur, name);
         }
 
-        if (!params.offload_kqv) {
-            if (strncmp(name, "kqv_merged_cont", 12) == 0) {
-                // all nodes between the KV store and the attention output are run on the CPU
-                ggml_backend_sched_set_tensor_backend(mSched, cur, mBackendCpu);
-            }
-        }
+        //if (!params.offload_kqv) {
+        //    if (strncmp(name, "kqv_merged_cont", 12) == 0) {
+        //        // all nodes between the KV store and the attention output are run on the CPU
+        //        ggml_backend_sched_set_tensor_backend(mSched, cur, mBackendCpu);
+        //    }
+        //}
 
         // norm may be automatically assigned to the backend of the previous layer, increasing data transfer between backends
         // FIXME: fix in ggml_backend_sched
         if (batch.numTokens < 32) {
             if (il != -1 && strncmp(name, "norm", 4) == 0) {
                 for (auto* backend : mBackends) {
-                    if (ggml_backend_buft_supports_backend(mModel->layerBufferTypes[il].bufferType, backend)) {
+                    if (ggml_backend_buft_supports_backend(mModel->getLayerBufferType(il).bufferType, backend)) {
                         ggml_backend_sched_set_tensor_backend(mSched, cur, backend);
                         break;
                     }
@@ -560,10 +567,13 @@ ggml_cgraph* Context::_buildGraph(const Batch& batch, bool worstCase) {
 
     struct ggml_cgraph* result = NULL;
 
-    switch (model.arch) {
+    Builder builder;
+
+    switch (mModel->getArch()) {
         case Arch::LLAMA:
         {
-            result = _buildLlamaGraph(batch, worstCase, cb);
+            result = builder.buildLlama(this, batch, mKvCache,
+                mModel->params, worstCase, cb);
         } break;
         default:
             assert(false);
