@@ -160,17 +160,21 @@ bool Model::loadParameters(ModelLoader& ml)
     ml.getKey(Kv::ROPE_SCALING_FINETUNED, ropeFinetuned, false);
     params.rope.fineTuned = ropeFinetuned;
 
-    params.rope.yarnOrigCtxLength = params.contextLength;
-    ml.getKey(Kv::ROPE_SCALING_ORIG_CTX_LEN, params.rope.yarnOrigCtxLength, false);
+    params.rope.origCtxSize = params.contextLength;
+    ml.getKey(Kv::ROPE_SCALING_ORIG_CTX_LEN, params.rope.origCtxSize, false);
+    if (params.rope.origCtxSize == 0) {
+        params.rope.origCtxSize  = params.contextLength;
 
-    //// rope_freq_base (optional)
-    params.rope.freqBaseTrain = 10000.0f;
-    ml.getKey(Kv::ROPE_FREQ_BASE, params.rope.freqBaseTrain, false);
+    }
+
+    // rope_freq_base (optional)
+    params.rope.freqBase = 10000.0f;
+    ml.getKey(Kv::ROPE_FREQ_BASE, params.rope.freqBase , false);
 
     std::string ropeScaling("linear");
     ml.getKey(Kv::ROPE_SCALING_TYPE, ropeScaling, false);
-    params.rope.scalingTypeTrain = getRopeScalingTypeFromString(ropeScaling);
-    assert(params.rope.scalingTypeTrain != RopeScalingType::UNSPECIFIED);
+    params.rope.scalingType = getRopeScalingTypeFromString(ropeScaling);
+    assert(params.rope.scalingType != RopeScalingType::UNSPECIFIED);
 
     // rope_freq_scale (inverse of the kv) is optional
     float ropescale = 0.0f;
@@ -178,7 +182,11 @@ bool Model::loadParameters(ModelLoader& ml)
         // try the old key name
         ml.getKey(Kv::ROPE_SCALE_LINEAR, ropescale, false);
     }
-    params.rope.freqScaleTrain = ropescale == 0.0f ? 1.0f : 1.0f / ropescale;
+    params.rope.freqScale = ropescale == 0.0f ? 1.0f : 1.0f / ropescale;
+    
+    if (params.rope.scalingType == RopeScalingType::NONE) {
+        params.rope.freqScale = 1.0f; // never scale if scaling type is none
+    }
 
     // sanity check for n_rot (optional)
     {

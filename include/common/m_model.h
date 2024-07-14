@@ -79,13 +79,12 @@ public:
         // ROFORMER: ENHANCED TRANSFORMER WITH ROTARY P OSITION E MBEDDING
         struct {
             size_t count;
-            size_t yarnOrigCtxLength;
-            float freqBaseTrain;
-            float freqScaleTrain;
-            RopeScalingType scalingTypeTrain;
+            size_t origCtxSize;
+            float freqBase;
+            float freqScale;
+            RopeScalingType scalingType;
             bool fineTuned;
         } rope; // Rotatary relative position encoding
-
 
         float normEps;
         float normRmsEps;

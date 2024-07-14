@@ -13,11 +13,19 @@ M_BEGIN_NAMESPACE
 
 namespace infer {
 
-Context::Builder::Builder() {
+Context::Builder::Builder(const Context::Parameters& cparams, const Model::Parameters& hparams) {
+    yarn.freqBase = hparams.rope.freqBase;
+    yarn.freqScale = hparams.rope.freqScale;
+    yarn.betaFast = cparams.yarn.betaFast;
+    yarn.betaSlow = cparams.yarn.betaSlow;
+    yarn.extFactor = cparams.yarn.extFactor;
+    yarn.attnFactor = cparams.yarn.attnFactor;
+    yarn.origCtxSize = hparams.rope.origCtxSize;
+
     //n_kv = (worst_case ? kv_self.size : kv_self.n);
 
-    n_kv(worst_case ? kv_self.size : kv_self.n),
-        n_outputs(worst_case ? n_tokens : lctx.n_outputs),
+    //n_kv(worst_case ? kv_self.size : kv_self.n),
+    //    n_outputs(worst_case ? n_tokens : lctx.n_outputs),
 }
 
 ggml_tensor* Context::Builder::buildInputEmbed(
@@ -384,24 +392,20 @@ ggml_cgraph* Context::Builder::buildLlama(Context* context, const Batch& batch, 
                 cb(Vcur, "Vcur", il);
             }
 
-            // Rotatry (relative) position encoding.
-            // Check out the reference paper, https://openreview.net/forum?id=wHBfxhZu1u
-            // YaRN: Efficient Context Window Extension of Large Language Models
-            // ??
             // -> Qcur: [HT x H x B]
             //    inputPosition: [B x 1]
             // <- Qcur: [HT x H x B]
             Qcur = ggml_rope_custom(
                 ctx, ggml_reshape_3d(ctx, Qcur, hparams.attentionHeadCountKv, numHeads, numTokens), inputPosition,
-                hparams.rope.count, int(hparams.rope.scalingTypeTrain), 0, hparams.rope.yarnOrigCtxLength, hparams.rope.freqBaseTrain, hparams.rope.freqScaleTrain,
-                extFactor, attnFactor, betaFast, betaSlow);
+                hparams.rope.count, int(hparams.rope.scalingTypeTrain), 0, yarn.origCtxSize, yarn.freqBase, yarn.freqScale,
+                yarn.extFactor, yarn.attnFactor, yarn.betaFast, yarn.betaSlow);
             cb(Qcur, "Qcur", il);
 
             // Ditto
             Kcur = ggml_rope_custom(
                 ctx, ggml_reshape_3d(ctx, Kcur, hparams.attentionKeyLength, hparams.attentionHeadCountKv, numTokens), inputPosition,
-                hparams.rope.count, int(hparams.rope.scalingTypeTrain), 0, hparams.rope.yarnOrigCtxLength, hparams.rope.freqBaseTrain, hparams.rope.freqScaleTrain,
-                extFactor, attnFactor, betaFast, betaSlow
+                hparams.rope.count, int(hparams.rope.scalingTypeTrain), 0, yarn.origCtxSize, yarn.freqBase, yarn.freqScale,
+                yarn.extFactor, yarn.attnFactor, yarn.betaFast, yarn.betaSlow);
             );
             cb(Kcur, "Kcur", il);
 

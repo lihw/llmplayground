@@ -83,26 +83,18 @@ Context* createContext(Model* model, const infer::Context::Parameters& parameter
     cparams.batchSize     = hparams.causal_attn ? std::min(cparams.contextSize, parameters.batchSize) : parameters.batchSize;
     cparams.unitBatchSize = std::min(cparams.batchSize, parameters.unitBatchSize == 0 ? parameters.batchSize : parameters.unitBatchSize);
 
+    cparams.yarn.extFactor = -1.0f;
+    cparams.yarn.attnFactor = 1.0f;
+    cparams.yarn.betaFast = 32.0f;
+    cparams.yarn.betaSlow = 1.0f;
+    cparams.yarn.defragThold = -1.0f;
 
-    //cparams.n_yarn_orig_ctx  = params.yarn_orig_ctx    != 0 ? params.yarn_orig_ctx    :
-    //                           hparams.n_yarn_orig_ctx != 0 ? hparams.n_yarn_orig_ctx :
-    //                                                          hparams.n_ctx_train;
+    if (cparams.yarn.extFactor < 0.0f) { // negative indicates 'not set'
+        cparams.yarn.extFactor = (hparams.rope.scalingType == RopeScalingType::YARN ? 1.0f : 0.0f);
+    }
 
     //cparams.cb_eval           = params.cb_eval;
     //cparams.cb_eval_user_data = params.cb_eval_user_data;
-
-    //auto rope_scaling_type = params.rope_scaling_type;
-    //if (rope_scaling_type == LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED) {
-    //    rope_scaling_type = hparams.rope_scaling_type_train;
-    //}
-
-    //if (rope_scaling_type == LLAMA_ROPE_SCALING_TYPE_NONE) {
-    //    cparams.rope_freq_scale = 1.0f; // never scale if scaling type is none
-    //}
-
-    //if (cparams.yarn_ext_factor < 0.0f) { // negative indicates 'not set'
-    //    cparams.yarn_ext_factor = rope_scaling_type == LLAMA_ROPE_SCALING_TYPE_YARN ? 1.0f : 0.0f;
-    //}
 
     if (cparams.poolingType == PoolingType::UNSPECIFIED) {
         if (hparams.poolingType == PoolingType::UNSPECIFIED) {

@@ -20,6 +20,8 @@ class Context {
     M_NO_MOVE_CONSTRUCTOR(Context);
 
 public:
+    //
+    // The runtime inference parameters, i.e., post-training parameters
     struct Parameters {
         size_t seed = 0xdeadbeef;
         size_t contextSize = 512;
@@ -40,18 +42,20 @@ public:
         ggml_type typeK = GGML_TYPE_F16;
         ggml_type typeV = GGML_TYPE_F16;
 
+        // Rotatry (relative) position encoding.
+        // Check out the reference paper, https://openreview.net/forum?id=wHBfxhZu1u
+        // YaRN: Efficient Context Window Extension of Large Language Models
+        // YaRN algorithm based on LlamaYaRNScaledRotaryEmbedding.py from https://github.com/jquesnelle/yarn
+        // MIT licensed. Copyright (c) 2023 Jeffrey Quesnelle and Bowen Peng.
+        struct {
+            float    extFactor;  // YaRN extrapolation mix factor, negative = from model
+            float    attnFactor; // YaRN magnitude scaling factor
+            float    betaFast;   // YaRN low correction dim
+            float    betaSlow;   // YaRN high correction dim
+            float    defragThold;     // defragment the KV cache if holes/size > thold, < 0 disabled (default)
+        } yarn;
 #if 0
         
-        /*.rope_scaling_type           =*/ LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED,
-        
-        /*.rope_freq_base              =*/ 0.0f,
-        /*.rope_freq_scale             =*/ 0.0f,
-        /*.yarn_ext_factor             =*/ -1.0f,
-        /*.yarn_attn_factor            =*/ 1.0f,
-        /*.yarn_beta_fast              =*/ 32.0f,
-        /*.yarn_beta_slow              =*/ 1.0f,
-        /*.yarn_orig_ctx               =*/ 0,
-        /*.defrag_thold                =*/ -1.0f,
         /*.cb_eval                     =*/ nullptr,
         /*.cb_eval_user_data           =*/ nullptr,
         /*.logits_all                  =*/ false,
@@ -86,7 +90,7 @@ private:
     struct KvCache;
 
     struct Builder {
-        explicit Builder();
+        explicit Builder(const Context::Parameters& cparams, const Model::Parameters& hparams);
 
         ~Builder();
 
@@ -121,10 +125,15 @@ private:
         uint32_t numKv;
         uint32_t numOutputs;
 
-        float extFactor;
-        float attnFactor;
-        float betaFast;
-        float betaSlow;
+        struct {
+            float origCtxSize;
+            float freqBase;
+            float freqScale;
+            float extFactor;
+            float attnFactor;
+            float betaFast;
+            float betaSlow;
+        } yarn;
     };
 
     struct KvCache {
